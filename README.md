@@ -11,7 +11,7 @@ It manages the stack most modded servers use: [LinuxGSM](https://linuxgsm.com) r
 ## Features
 
 - **Guided setup (Setup tab).** Eight steps with live output take Ubuntu or Debian from nothing to a running modded server: LinuxGSM, the Valheim server, name/world/password/port, BepInEx, the `common.cfg` wiring (previewed and backed up first), ValheimEnforcer and its dependencies, helper scripts, and a start-and-verify check. A checklist shows when everything is up.
-- **Several worlds at once.** Each extra world is its own isolated instance (own game account, files, mods, port, backups and schedules). A world switcher in the sidebar points every tab at one world, and a world can be uninstalled from the VPS again (account, files and jobs) with an optional backup copy.
+- **Several worlds at once.** Each extra world is its own isolated instance (own game account, files, mods, port, backups and schedules). A world switcher in the sidebar points every tab at one world, and a world can be uninstalled from the VPS again (account, files, jobs and firewall rule) with an optional backup copy.
 - **Mods.** List what is installed, check for updates against Hexium and Thunderstore, install and update with a Source/Author/Version prompt, disable, remove, and recategorize mods for ValheimEnforcer. Dependencies are checked, and Gale deep links make joining easy.
 - **Player codes.** Generate Gale profile codes for players and admins straight from the installed mods.
 - **Backups.** Run, list and restore backups; schedule them with cron on the VPS (skipped when the server is stopped or, if you choose, while players are online). Server updates take a backup first and stop if it fails.
@@ -30,7 +30,7 @@ It manages the stack most modded servers use: [LinuxGSM](https://linuxgsm.com) r
 
 - **Where the GUI runs:** [Node.js](https://nodejs.org) 18 or newer, on your own PC or on the VPS.
 - **The server:** a VPS with **Ubuntu or Debian**, root SSH access (or run the GUI on the VPS in local mode), about 4 GB of RAM for one world and 10 GB or more of free disk. Each extra world needs roughly 2 GB more disk and more RAM.
-- **Network:** UDP ports for each world must be open in your VPS or cloud firewall (2456-2458 for the first world).
+- **Network:** UDP ports for each world (2456-2458 for the first world). The GUI opens and closes them in `ufw` for you when `ufw` is active; a firewall in your hosting provider's panel is separate and must be opened there.
 
 ## Quick start
 

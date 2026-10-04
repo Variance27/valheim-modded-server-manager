@@ -45,13 +45,8 @@ The checklist reaches **all green** and a banner says "The server is up and modd
 
 - The **Dashboard** shows status `active`, and the sidebar title changes from "Valheim" to your world name.
 - Players connect with `<your VPS public IP>:2456`. Set `publicHost` in `config.json` so the Dashboard shows the address with a copy button.
-- **Open the firewall.** A Valheim server uses its port and the next two (2456-2458 for the first world), all UDP. Open them on the VPS and in your provider's firewall if it has one:
-
-  ```bash
-  sudo ufw allow 2456:2458/udp     # only needed if ufw is active; check with: sudo ufw status
-  ```
-
-  The GUI cannot open your provider's firewall for you.
+- **The firewall is handled for you on the VPS.** A Valheim server uses its port and the next two (2456-2458 for the first world), all UDP. If the VPS runs an active `ufw` firewall, the GUI opens that range when you save the port in step 3 and again just before the first start in step 8, and the checklist shows "Firewall allows the game ports". If `ufw` is not installed or is switched off, nothing on the VPS blocks the ports and the GUI changes nothing. It never turns `ufw` on or off and never touches other rules.
+- **A firewall in your hosting provider's panel is separate.** The GUI cannot see or change it. If your provider gave the VPS a firewall (for example in its control panel), add an inbound UDP rule for the same range there.
 
 ## After setup
 

@@ -8,7 +8,7 @@ Valheim runs one world per server process, so extra worlds are extra server inst
 
 1. Open **Worlds, then Add world** and type a name. The GUI reserves a game port (2466, then 2476 and so on) and opens that world's Setup tab.
 2. Run the eight Setup steps for it. Step 1 creates the game account `vhserver-<id>`, step 3 saves its server name, world name, password and **its own game port**, and step 8 starts it. Each world installs its own copy of the server (about 2 GB) and its own mods.
-3. Open the UDP range for the new port, for example `sudo ufw allow 2466:2468/udp`, and the same range in your provider's firewall.
+3. The GUI opens the UDP range for the new port in `ufw` when you save the port (step 3) and before the first start (step 8), if `ufw` is active. A firewall in your provider's panel is separate; open the same range there if you use one.
 4. Use the sidebar **World** switcher, or **Manage** on the Worlds page, to work on a world. Mods, Backups, Updates, Settings, Logs and the Dashboard then show that world.
 
 Adding or setting up a world does not touch any existing world. Before Setup on a new world, check the World switcher and the "Setting up: <label>" chip at the top of the Setup tab to be sure you are on the world you mean. Take a backup of important worlds first, as with any change.
@@ -32,12 +32,12 @@ Each world needs its own RAM and about 2 GB of disk. As a rough guide, a 12 GB, 
 Stop the world first, then press **Remove** on the Worlds page. You get three choices:
 
 - **Remove from GUI only** makes the GUI forget the world and removes its scheduled jobs. The game account, files and backups stay on the VPS.
-- **Delete everything** uninstalls the world from the VPS. It stops any leftover processes of the world's game account, removes its cron jobs, wrapper scripts, lock and status files, then deletes the account `vhserver-<id>` together with its home folder (game files, mods, saves and backups). This cannot be undone.
+- **Delete everything** uninstalls the world from the VPS. It stops any leftover processes of the world's game account, removes its cron jobs, wrapper scripts, lock and status files, deletes the account `vhserver-<id>` together with its home folder (game files, mods, saves and backups), and closes the world's UDP ports in `ufw`. This cannot be undone.
 - **Delete, keep a copy** does the same but first copies the world saves, the admin, ban and permitted lists, and the backups to `/var/lib/valheim-removed-worlds/<id>-<timestamp>/` on the VPS (readable by root only).
 
 The delete buttons stay disabled until you type `DELETE`, and the dialog shows how much disk the world uses and how many saves and backups it has. The main world cannot be uninstalled from the GUI, and the GUI refuses to delete anything that is not the `vhserver-<id>` account it created for that world. If an uninstall fails, the world stays listed so you can retry.
 
-Uninstalling does not close firewall ports. Remove the world's UDP rules yourself (for example `sudo ufw delete allow 2466:2468/udp`).
+The firewall step only runs when `ufw` is active, only touches the world's own UDP range (a rule you added by hand for exactly that range is closed too), and is skipped if another world uses nearby ports. A firewall in your provider's panel is not touched; delete the rule there yourself.
 
 ## Things to know
 

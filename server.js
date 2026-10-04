@@ -916,6 +916,80 @@ app.patch('/api/instances/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Firewall (ufw) ----
+//
+// A Valheim world needs UDP <port> to <port>+2 open. When the VPS runs ufw AND it is active, the GUI
+// opens that range when the port is saved (Setup step 3 / Settings) and before the first start, and
+// closes it again when the world is uninstalled. It never turns ufw on or off, never touches any
+// other rule, and cannot change a firewall in your hosting provider's panel. Rules carry the comment
+// "valheim-gui:<world id>" so they can be recognised later.
+const gameRange = (port) => `${Number(port)}:${Number(port) + 2}`;
+async function worldGamePort() {
+  const info = await getWorldInfo();
+  if (curId() === 'main' || info.portExplicit) return Number(info.port);
+  const reg = readRegistry().find((i) => i.id === curId());
+  return reg && reg.plannedPort ? Number(reg.plannedPort) : null;
+}
+// mode: status | open | close (any rule on exactly this range) | close-tagged (only a rule this GUI tagged for this world)
+async function fwRun(mode, port, tag = `valheim-gui:${curId()}`) {
+  if (!Number.isInteger(Number(port)) || Number(port) < 1024 || Number(port) > 65530) throw new Error(`Refusing to change firewall rules for port ${port}`);
+  const range = gameRange(port);
+  const script = [
+    'set -u',
+    `RANGE=${shq(range)}/udp; TAG=${shq(tag)}; MODE=${shq(mode)}`,
+    'command -v ufw >/dev/null 2>&1 || { echo "FW:none"; exit 0; }',
+    'ufw status 2>/dev/null | head -n1 | grep -qi "inactive" && { echo "FW:inactive"; exit 0; }',
+    'echo "FW:active"',
+    'has() { ufw status 2>/dev/null | awk -v r="$RANGE" -v t="$1" \'$1==r && (t=="" || index($0,t)>0){f=1} END{exit f?0:1}\'; }',
+    'if has ""; then echo "OPEN:yes"; else echo "OPEN:no"; fi',
+    'case "$MODE" in',
+    '  open) if has ""; then echo "RESULT:already"; else OUT="$(ufw allow "$RANGE" comment "$TAG" 2>&1)" && echo "RESULT:opened" || echo "RESULT:failed $OUT"; fi ;;',
+    '  close|close-tagged)',
+    '    if [ "$MODE" = close-tagged ]; then T="$TAG"; else T=""; fi',
+    '    if has "$T"; then OUT="$(ufw --force delete allow "$RANGE" 2>&1)"; if has ""; then echo "RESULT:failed $OUT"; else echo "RESULT:closed"; fi; else echo "RESULT:absent"; fi ;;',
+    'esac',
+  ].join('\n');
+  const r = await sshExec(asRootScript(script));
+  const out = `${r.stdout || ''}`;
+  const tool = (/FW:(\w+)/.exec(out) || [])[1] || 'none';
+  const result = (/RESULT:(\w+)(?: (.*))?/.exec(out) || []);
+  const info = { tool: tool === 'none' ? 'none' : 'ufw', active: tool === 'active', open: /OPEN:yes/.test(out) || result[1] === 'opened', range, result: result[1] || null, detail: result[2] || '' };
+  if (result[1] === 'closed') info.open = false;
+  info.message = fwMessage(info, mode);
+  return info;
+}
+function fwMessage(f, mode) {
+  const udp = `UDP ${f.range}`;
+  if (f.tool === 'none') return 'This VPS has no ufw firewall, so there was nothing to change. A firewall in your provider panel is separate and must be set there.';
+  if (!f.active) return `The VPS firewall (ufw) is off, so nothing on the VPS blocks ${udp}. A firewall in your provider panel is separate and must be set there.`;
+  if (f.result === 'opened') return `Opened ${udp} in the VPS firewall (ufw).`;
+  if (f.result === 'already') return `${udp} is already open in the VPS firewall (ufw).`;
+  if (f.result === 'closed') return `Closed ${udp} in the VPS firewall (ufw).`;
+  if (f.result === 'absent') return `No ufw rule for ${udp} was found, so nothing was closed.`;
+  if (f.result === 'failed') return `Could not change the ufw rule for ${udp}: ${f.detail}`;
+  return f.open ? `${udp} is open in the VPS firewall (ufw).` : `${udp} is not open in the VPS firewall (ufw).`;
+}
+
+app.get('/api/firewall', async (req, res) => {
+  try {
+    const port = await worldGamePort();
+    if (!port) return res.json({ tool: 'none', active: false, open: false, message: 'This world has no game port yet.' });
+    res.json({ port, ...(await fwRun('status', port)) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/firewall/open', async (req, res) => {
+  try {
+    const port = await worldGamePort();
+    if (!port) return res.status(400).json({ error: 'This world has no game port yet. Save one in Setup step 3 first.' });
+    res.json({ port, ...(await fwRun('open', port)) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Uninstalling a world from the VPS ----
 //
 // "Remove" can either only forget a world in the GUI, or also delete it from the VPS: stop its
@@ -1048,7 +1122,22 @@ app.delete('/api/instances/:id', async (req, res) => {
     });
     // Uninstalling happens BEFORE the world is forgotten, so a failure leaves it listed and retryable.
     let purged = null;
-    if (purge) purged = await inWorld(id, () => purgeWorldHost(entry, keep));
+    let fw = null;
+    if (purge) {
+      // The port is read BEFORE the world's files are deleted.
+      const fwPort = await inWorld(id, () => worldGamePort()).catch(() => null);
+      purged = await inWorld(id, () => purgeWorldHost(entry, keep));
+      // Close its UDP range, unless another world's ports overlap it.
+      fw = await inWorld(id, async () => {
+        if (!fwPort) return null;
+        try {
+          if ((await otherWorldPorts()).some((o) => portsOverlap(o.port, fwPort))) return { message: `UDP ${gameRange(fwPort)} was left open because another world uses nearby ports.` };
+          return await fwRun('close', fwPort);
+        } catch (e) {
+          return { message: `The firewall was not changed: ${e.message}` };
+        }
+      });
+    }
     writeRegistry(reg.filter((x) => x.id !== id));
     instanceCtx.delete(id);
     worldInfoCaches.delete(id);
@@ -1058,9 +1147,9 @@ app.delete('/api/instances/:id', async (req, res) => {
       /* no pending list */
     }
     const note = purge
-      ? `"${entry.label}" was uninstalled: game account ${entry.lgsmUser} and its files were deleted from the VPS.${purged && purged.keptAt ? ` A copy of its saves and backups is in ${purged.keptAt}.` : ''} Remember to close its UDP ports in your firewall.`
+      ? `"${entry.label}" was uninstalled: game account ${entry.lgsmUser} and its files were deleted from the VPS.${purged && purged.keptAt ? ` A copy of its saves and backups is in ${purged.keptAt}.` : ''} ${fw && fw.message ? fw.message : 'Check that its UDP ports are closed in your firewall.'}`
       : `"${entry.label}" is no longer managed here. Its game account (${entry.lgsmUser}) and files are still on the VPS.`;
-    res.json({ ok: true, purged: !!purge, keptAt: purged ? purged.keptAt : null, log: purged ? purged.log : [], note });
+    res.json({ ok: true, purged: !!purge, keptAt: purged ? purged.keptAt : null, log: purged ? purged.log : [], firewall: fw, note });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1832,9 +1921,24 @@ app.post('/api/settings', async (req, res) => {
         return res.status(400).json({ error: 'Valheim refuses a password that contains the world name. Change one of them.' });
       }
     }
+    const oldPort = clean.port !== undefined ? await worldGamePort().catch(() => null) : null;
     const out = await applyCfgValues(clean);
     invalidateWorldInfo();
     if (out.applied) notePending(`Server settings changed (${keys.filter((k) => k !== 'worldmodifiers').join(', ') || 'world modifiers'})`);
+    // A changed game port: open the new UDP range and close the one this GUI opened for the old port.
+    // Firewall trouble never fails the settings save.
+    if (clean.port !== undefined && out.applied) {
+      try {
+        const fw = await fwRun('open', Number(clean.port));
+        if (oldPort && Number(oldPort) !== Number(clean.port) && fw.active) {
+          const old = await fwRun('close-tagged', oldPort);
+          if (old.result === 'closed') fw.message += ` ${old.message}`;
+        }
+        out.firewall = fw;
+      } catch (e) {
+        out.firewall = { tool: 'none', message: `Firewall not changed: ${e.message}` };
+      }
+    }
     res.json(out);
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -4349,6 +4453,14 @@ app.get('/api/setup/status', async (req, res) => {
       needsRestart: st.NEEDS_RESTART === 'yes',
       bepinexLoaded: st.BEPINEX_LOADED === 'yes',
       enforcerLoaded: st.ENFORCER_LOADED === 'yes',
+      firewall: await (async () => {
+        try {
+          const port = await worldGamePort();
+          return port && st.LGSM_USER === 'yes' ? { port, ...(await fwRun('status', port)) } : null;
+        } catch (e) {
+          return null;
+        }
+      })(),
       paths: { serverDir: sd, scriptsDir: p.scriptsDir, commonCfg: p.commonCfgPath },
     });
   } catch (e) {

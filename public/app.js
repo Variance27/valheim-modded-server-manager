@@ -3106,10 +3106,11 @@ async function saveSettings(ev) {
   setBtnLoading(btn, true);
   try {
     const r = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }) });
-    toast('success', 'Settings saved', r.note);
-    $('set-note').textContent = r.note || '';
+    const fwNote = r.firewall && r.firewall.message ? ` ${r.firewall.message}` : '';
+    toast('success', 'Settings saved', `${r.note || ''}${fwNote}`.trim());
+    $('set-note').textContent = `${r.note || ''}${fwNote}`.trim();
     await loadSettings();
-    $('set-note').textContent = r.note || '';
+    $('set-note').textContent = `${r.note || ''}${fwNote}`.trim();
   } catch (e) {
     toast('error', 'Could not save settings', e.message);
   } finally {
@@ -3786,7 +3787,7 @@ async function removeWorld(id) {
     tone: 'danger',
     html:
       `<p><strong>Remove from GUI only</strong> keeps everything on the VPS: the game account <code>${esc(w.lgsmUser)}</code>, its files and its backups.</p>` +
-      `<p><strong>Delete everything</strong> uninstalls the world from the VPS: it stops any leftover processes, removes the scheduled jobs, and deletes the game account <code>${esc(w.lgsmUser)}</code> with its home folder (game files, mods, saves and backups)${size ? ` &mdash; ${esc(size)}` : ''}. <strong>This cannot be undone.</strong> <em>Delete, keep a copy</em> first copies the world saves and backups to <code>/var/lib/valheim-removed-worlds/</code> on the VPS.</p>` +
+      `<p><strong>Delete everything</strong> uninstalls the world from the VPS: it stops any leftover processes, removes the scheduled jobs, deletes the game account <code>${esc(w.lgsmUser)}</code> with its home folder (game files, mods, saves and backups)${size ? ` &mdash; ${esc(size)}` : ''}, and closes its UDP ports in the VPS firewall (ufw). <strong>This cannot be undone.</strong> <em>Delete, keep a copy</em> first copies the world saves and backups to <code>/var/lib/valheim-removed-worlds/</code> on the VPS.</p>` +
       `<p>The other worlds are not touched.</p>`,
     input: { label: 'To enable the delete buttons, type <code>DELETE</code>', placeholder: 'DELETE', match: 'DELETE' },
     actions: [
@@ -3840,6 +3841,7 @@ const SETUP_CHECKS = [
   { label: 'Jotunn (Enforcer needs it)', ok: (r) => r.jotunnPlugin, hint: 'Step 6' },
   { label: 'Helper scripts', ok: (r) => r.ruamel && Object.values(r.helpers || {}).every(Boolean), hint: 'Step 7' },
   { label: 'Server running', ok: (r) => r.serverState === 'active', hint: 'Step 8' },
+  { label: 'Firewall allows the game ports', ok: (r) => !r.firewall || r.firewall.tool !== 'ufw' || !r.firewall.active || !!r.firewall.open, hint: 'Opened for you in step 3 and step 8 (ufw only)' },
   { label: 'Game port open', ok: (r) => !!r.portOpen, hint: 'Step 8 — can take a few minutes after the first start' },
   { label: 'World created', ok: (r) => !!(r.identity && r.identity.worldCreated), hint: 'Step 8' },
   { label: 'BepInEx loaded', ok: (r) => r.bepinexLoaded, hint: 'Step 8 — needs steps 4 and 5 before the start' },
@@ -3977,7 +3979,7 @@ async function runSetupIdentity() {
   try {
     const r = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }) });
     if (r.error) throw new Error(r.error);
-    msg.innerHTML = `<div class="callout good sm" style="margin-top:10px">${esc(r.applied ? 'Saved.' : r.note || 'No changes.')} They take effect on the next start.</div>`;
+    msg.innerHTML = `<div class="callout good sm" style="margin-top:10px">${esc(r.applied ? 'Saved.' : r.note || 'No changes.')} They take effect on the next start.${r.firewall && r.firewall.message ? `<br>${esc(r.firewall.message)}` : ''}</div>`;
     $('setup-password').value = '';
     setupIdentityLoaded = false;
     toast('success', 'Server settings saved');
@@ -4010,6 +4012,13 @@ async function runSetupStart() {
   setConsoleState(out, 'running');
   setBtnLoading(btn, true);
   try {
+    // Make sure the game's UDP ports are open first (only does something when the VPS runs an active ufw).
+    try {
+      const fw = await api('/api/firewall/open', { method: 'POST' });
+      if (fw && fw.message) out.textContent += `[firewall] ${fw.message}\n`;
+    } catch (e) {
+      out.textContent += `[firewall] could not check the firewall: ${e.message}\n`;
+    }
     const r = await api('/api/server/start', { method: 'POST' });
     out.textContent += (r.stdout || '') + (r.stderr || '');
     const failed = r.code && r.code !== 0;

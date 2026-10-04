@@ -22,7 +22,7 @@ More generally, "Non-allowed mods" means the client has a mod that is not in the
 ## Players cannot join
 
 1. Is the process up? `sudo pgrep -u vhserver -a valheim_server`
-2. Are the UDP ports open? A world uses its port and the next two (2456-2458 for the first world). Check `sudo ufw status verbose`, and your provider's firewall if it has one.
+2. Are the UDP ports open? A world uses its port and the next two (2456-2458 for the first world). The GUI opens them in `ufw` for you (Setup step 3 and step 8; the checklist has a "Firewall allows the game ports" item), so check `sudo ufw status verbose` to see the rule. A firewall in your provider's panel is separate and must be opened there.
 3. Test with **Join by IP** (`<VPS IP>:2456`). A server can be reachable while the server browser still takes minutes to list it.
 4. Do the versions match? The error screen shows the local and remote Valheim and mod versions.
 
