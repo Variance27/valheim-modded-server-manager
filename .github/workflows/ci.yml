@@ -13,15 +13,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - name: JavaScript syntax
         run: npm run check
       - name: Shell script syntax
         run: for f in vps-scripts/*.sh; do bash -n "$f"; done
       - name: Python syntax
         run: python3 -m py_compile vps-scripts/*.py
+      - name: Tests (GUI, login, webhooks, worlds, scripts)
+        run: npm test
+      - name: Tests (helper scripts and the Discord bot)
+        run: |
+          python3 -m pip install --quiet discord.py
+          npm run test:py
       - name: No secrets or personal config committed
         run: |
-          for f in config.json auth.json instances.json; do
+          for f in config.json auth.json instances.json notifications.json; do
             if [ -e "$f" ]; then echo "$f must not be committed"; exit 1; fi
           done
