@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-05
+
 ### Added
 
 - **Health alerts.** Settings has a Health alerts card. A small cron job on the VPS posts to the status channel when the server is down, or when disk space or free memory crosses a threshold, with re-alert throttling. It keeps working when the GUI is closed. A server stopped from the GUI, or stopped by a backup, update or restore, is treated as deliberate and does not alert.
@@ -18,6 +20,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - The uninstall preview now counts world saves correctly and says whether the world has ever been saved.
 - Running as a non-root SSH user: reads of game account homes (mode 750) and the Setup status checks now go through sudo, so they no longer report false "missing" results.
+- The Updates tab check no longer fails with "could not determine latest buildid" when Debian's `steamcmd` wrapper is broken: it prefers the SteamCMD copies in the game account's home, tries each in turn, retries, and prints SteamCMD's last lines on failure.
+- The Health alerts card no longer gets overwritten by dashboard status updates (a duplicate function name), and disk/memory thresholds are only validated where they apply.
 - `update-valheim.sh` sets the maintenance flag for the whole update, so health alerts stay quiet while the server is deliberately down.
 
 ## [1.0.0] - 2026-10-05
