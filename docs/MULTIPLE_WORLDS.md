@@ -39,6 +39,12 @@ The delete buttons stay disabled until you type `DELETE`, and the dialog shows h
 
 The firewall step only runs when `ufw` is active, only touches the world's own UDP range (a rule you added by hand for exactly that range is closed too), and is skipped if another world uses nearby ports. A firewall in your provider's panel is not touched; delete the rule there yourself.
 
+### Restoring a kept copy
+
+If you kept a copy when uninstalling, it appears in the **Kept copies** card on the Worlds page. **Restore into** puts the saved world and backups into an existing world you choose (confirming before it overwrites, with a safety copy first; the admin, ban and whitelist files only if you tick that option). **Delete** removes the copy for good. Copies live in `/var/lib/valheim-removed-worlds` on the VPS.
+
+![Kept copies card](images/kept-copies.png)
+
 ## Things to know
 
 - If you upgraded from a version without multi-world support, re-save the main world's backup schedule once so its wrapper only looks at its own game process.

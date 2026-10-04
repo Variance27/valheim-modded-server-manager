@@ -59,6 +59,12 @@ The second card on the Settings tab holds the two webhook URLs (changes and stat
 
 Optional card on the Settings tab that installs, configures and removes the `/codes` bot. See [Discord bot](DISCORD_BOT.md).
 
+## Health alerts
+
+Settings has a card that installs a small cron job on the VPS. It posts to the status Discord channel when the server is down or when disk or memory use crosses your thresholds, and repeats at most once an hour while the problem lasts. It does not need the GUI to be open. Stopping the server from the GUI, and backups, updates and restores, set a flag so those stops are not reported. **Run a check now** runs the job once and shows the result.
+
+![Discord notifications card](images/discord-settings.png)
+
 ## Logs
 
 A snapshot of the LinuxGSM console log or `LogOutput.log`, plus a "Go Live" toggle that streams new lines until you stop it.

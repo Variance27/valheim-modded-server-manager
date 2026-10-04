@@ -41,3 +41,7 @@ Two channels are supported, and both are set in **Settings, then Discord notific
 Keeping them separate lets you mute or restrict the noisy one without losing the alerts that matter. Each field has a **Send test** button that also works on a URL you have typed but not saved yet. Once saved, the full URL is never shown again, only its last four characters.
 
 When the status channel in effect changes, the GUI refreshes it on the VPS for every installed world: it regenerates the enabled backup and update-check wrapper scripts and updates `DISCORD_WEBHOOK_URL` in each world's `valheim-notify.conf` (other lines such as `CLOUD_REMOTE` are kept). You do not need to re-save the schedules. A "Notify Discord" send reports whether the message really went through; if the webhook is wrong, you get an alert and your pending changes stay queued.
+
+## Health alerts and deliberate stops
+
+The health job and the liveness check skip alerts while `.stopped-by-gui` or `.maintenance` exists in the game account's home. The GUI's Stop button sets the first, Start clears it, and backups, updates and restores hold the second for their duration.

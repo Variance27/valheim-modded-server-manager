@@ -25,7 +25,9 @@
   "scripts": {
     "start": "node server.js",
     "set-password": "node set-password.js",
-    "check": "node --check server.js && node --check auth.js && node --check set-password.js && node --check public/app.js"
+    "check": "node --check server.js && node --check auth.js && node --check set-password.js && node --check public/app.js",
+    "test": "node --test test/api.test.js test/scripts.test.js",
+    "test:py": "python3 -m unittest discover -s test -p 'test_*.py'"
   },
   "engines": {
     "node": ">=18"

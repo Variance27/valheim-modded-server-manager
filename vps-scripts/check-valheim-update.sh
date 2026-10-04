@@ -91,17 +91,31 @@ INSTALLED_BUILDID="$(grep -m1 '"buildid"' "$MANIFEST" | grep -oE '[0-9]+')"
 # ---------------------------------------------------------------------------
 # Latest public buildid, from Steam directly (read-only info query)
 # ---------------------------------------------------------------------------
-LATEST_BUILDID="$(sudo -u "$LGSM_USER" "$STEAMCMD" \
-    +@sSteamCmdForcePlatformType linux \
-    +login anonymous \
-    +app_info_update 1 \
-    +app_info_print 896660 \
-    +quit 2>/dev/null \
-    | awk '/"branches"/{f=1} f && /"public"/{p=1} p && /"buildid"/{print; exit}' \
-    | grep -oE '[0-9]+')"
+# SteamCMD often fails on the first try (it self-updates, or Steam answers slowly or
+# not at all), so try up to three times, and keep what it printed so a failure can say why.
+LATEST_BUILDID=""
+STEAM_OUT=""
+for attempt in 1 2 3; do
+    STEAM_OUT="$(timeout 180 sudo -H -u "$LGSM_USER" "$STEAMCMD" \
+        +@ShutdownOnFailedCommand 0 \
+        +@NoPromptForPassword 1 \
+        +@sSteamCmdForcePlatformType linux \
+        +login anonymous \
+        +app_info_update 1 \
+        +app_info_print 896660 \
+        +quit 2>&1)"
+    LATEST_BUILDID="$(printf '%s\n' "$STEAM_OUT" \
+        | awk '/"branches"/{f=1} f && /"public"/{p=1} p && /"buildid"/{print; exit}' \
+        | grep -oE '[0-9]+')"
+    [ -n "$LATEST_BUILDID" ] && break
+    [ "$attempt" -lt 3 ] && sleep 5
+done
 
 if [ -z "$LATEST_BUILDID" ]; then
-    log_error "could not determine latest buildid from Steam"
+    log_error "could not determine latest buildid from Steam (3 attempts, using $STEAMCMD as $LGSM_USER)"
+    echo "Last lines SteamCMD printed:"
+    printf '%s\n' "$STEAM_OUT" | grep -v '^\s*$' | tail -n 8 | sed 's/^/  | /'
+    [ -z "$STEAM_OUT" ] && echo "  | (nothing - steamcmd printed no output; check that 'sudo -u $LGSM_USER' works without a password prompt)"
     exit 1
 fi
 

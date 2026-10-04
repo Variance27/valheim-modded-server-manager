@@ -671,6 +671,23 @@
           </div>
         </div>
         <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">Health alerts <span class="badge" id="hl-badge" style="margin-left:6px"></span></h2><p class="card-sub" id="hl-sub">A small job on the VPS checks every few minutes and posts to the status Discord channel. It keeps working when this GUI is closed. A server you stop from the GUI, or that a backup, update or restore stopped, counts as deliberate.</p></div></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;padding:8px 16px 8px">
+            <label class="switch"><input type="checkbox" id="hl-enabled"><span class="switch-track"></span>Send alerts</label>
+            <div><label class="card-note" for="hl-minutes">Check every</label>
+              <select class="input" id="hl-minutes" style="width:100%"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">hour</option></select></div>
+            <label class="switch"><input type="checkbox" id="hl-live" checked><span class="switch-track"></span>Server stopped or crashed</label>
+            <label class="switch" id="hl-res-wrap"><input type="checkbox" id="hl-res" checked><span class="switch-track"></span>Low disk space and memory (whole VPS)</label>
+            <div id="hl-disk-wrap"><label class="card-note" for="hl-disk">Alert when disk is this full (%)</label><input class="input" id="hl-disk" type="number" min="50" max="99" value="85" style="width:100%"></div>
+            <div id="hl-mem-wrap"><label class="card-note" for="hl-mem">Alert when free memory drops below (%)</label><input class="input" id="hl-mem" type="number" min="3" max="50" value="10" style="width:100%"></div>
+          </div>
+          <p class="card-note" id="hl-state" style="padding:0 16px"></p>
+          <div style="padding:8px 16px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary" id="hl-save" onclick="saveHealth()">Save health alerts</button>
+            <button class="btn btn-sm" id="hl-run" onclick="runHealth()">Run a check now</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
           <div class="card-head"><div><h2 class="card-title">Discord bot <span class="badge" id="bot-badge" style="margin-left:6px"></span></h2><p class="card-sub">Optional. Lets people with permission type <code>/codes</code> in Discord to get the Gale profile code for any world. Runs as a service on the VPS, so it keeps working when this GUI is closed.</p></div></div>
           <details style="padding:0 16px 8px">
             <summary class="card-note" style="cursor:pointer">How to get the token and IDs (one time, in Discord)</summary>
@@ -777,6 +794,10 @@
           </div>
         </div>
         <div id="worlds-grid" class="world-grid"></div>
+        <div class="card hidden" id="kept-card" style="margin-top:16px">
+          <div class="card-head"><div><h2 class="card-title">Kept copies of deleted worlds</h2><p class="card-sub">Made by "Delete, keep a copy". Restore the saves into any world that is stopped, or delete a copy you no longer need. Kept on the VPS in <code>/var/lib/valheim-removed-worlds</code>.</p></div></div>
+          <div id="kept-list" style="padding:0 16px 16px"></div>
+        </div>
         <div class="callout info" style="margin-top:16px">
           <svg class="i"><use href="#i-info"/></svg>
           <div>Every world needs its own game port (a Valheim server uses its port and the next two, so worlds are 10 apart: 2456, 2466, 2476, ...). Open the UDP range for each world in your VPS or cloud firewall. Each extra world installs its own copy of the server (about 2 GB of disk) and its own mods.</div>

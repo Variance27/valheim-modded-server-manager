@@ -29,9 +29,11 @@ Run the checks before you open a pull request:
 
 ```bash
 npm run check
-for f in vps-scripts/*.sh; do bash -n "$f"; done
-python3 -m py_compile vps-scripts/*.py
+npm test                                      # GUI, login, webhooks, worlds, script syntax (no VPS needed)
+pip install discord.py && npm run test:py     # helper scripts and the Discord bot
 ```
+
+The tests start a throwaway copy of the GUI in local mode inside a temp folder, so they never touch your own `config.json`, `auth.json` or `instances.json`. They do not need a VPS. Add a test with every behavior change you can cover that way.
 
 ## Guidelines
 

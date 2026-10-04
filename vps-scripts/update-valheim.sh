@@ -42,6 +42,9 @@ if ! SKIP_RESTART=1 bash "$BACKUP_SCRIPT"; then
 fi
 
 echo "== Step 2/2: backup OK, running LGSM update =="
+# Tell the health check this downtime is on purpose (removed again however the script ends).
+touch "__LGSM_HOME__/.maintenance"
+trap 'rm -f "__LGSM_HOME__/.maintenance"' EXIT
 # Server is still stopped here (SKIP_RESTART=1 kept it down, and
 # backup-valheim.sh already stopped it via `./vhserver stop` to take the
 # backup) — LGSM's update needs it stopped to safely validate/overwrite

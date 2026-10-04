@@ -6,10 +6,19 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- **Health alerts.** Settings has a Health alerts card. A small cron job on the VPS posts to the status channel when the server is down, or when disk space or free memory crosses a threshold, with re-alert throttling. It keeps working when the GUI is closed. A server stopped from the GUI, or stopped by a backup, update or restore, is treated as deliberate and does not alert.
+- **Restore a kept copy.** When a world is uninstalled with "keep a copy", the Worlds page lists the copy and can restore it into a new world or delete it.
+- **Automated tests and CI.** `npm test` runs API and script tests in temporary directories, `npm run test:py` tests the bot and code generator, and a GitHub Actions workflow runs both. A `package-lock.json` is included.
 - **Optional Discord `/codes` bot, installed from the GUI.** Settings has a Discord bot card that installs the bot as a systemd service (own virtualenv, root-only token file), with start, stop, restart, log, refresh and remove. `/codes` has a `world` option fed by the GUI's world list, which updates when worlds are added or deleted. The public post and profile names use the world's own name instead of a hard-coded one. A bot service that the GUI did not create is never touched.
 - **Discord webhooks in the GUI.** Settings has a Discord notifications card for the changes and status channels, with test buttons, masked display and validation. Saving a new status URL refreshes the backup and update-check jobs and each world's `valheim-notify.conf` on the VPS. URLs are stored in the git-ignored `notifications.json` and win over `config.json`.
 - **Firewall handling.** When the VPS runs an active `ufw`, the GUI opens a world's UDP game ports (port to port+2) when the port is saved in Setup step 3 or Settings and before the first start in step 8, moves the rule when the port changes, and closes it when the world is uninstalled. It never enables or disables `ufw` and never touches other rules. A new Setup checklist item shows the state.
 - **Uninstall a world from the VPS.** Removing an extra world can now also stop its processes, remove its cron jobs and files, and delete its game account and home folder, optionally keeping a copy of the saves and backups first. Guarded by a typed `DELETE` confirmation, a size preview, and strict checks that only `vhserver-<id>` for that world can be touched.
+
+### Fixed
+
+- The uninstall preview now counts world saves correctly and says whether the world has ever been saved.
+- Running as a non-root SSH user: reads of game account homes (mode 750) and the Setup status checks now go through sudo, so they no longer report false "missing" results.
+- `update-valheim.sh` sets the maintenance flag for the whole update, so health alerts stay quiet while the server is deliberately down.
 
 ## [1.0.0] - 2026-10-05
 

@@ -65,6 +65,7 @@ For the full walkthrough, see [Getting started](docs/GETTING_STARTED.md).
 | [Discord bot](docs/DISCORD_BOT.md) | The optional `/codes` bot and how to set it up |
 | [VPS helper scripts](docs/VPS_SCRIPTS.md) | The scripts installed on the VPS and how they work |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Fixes for problems seen in real use |
+| [Testing](docs/TESTING.md) | Automated tests and what still needs a real VPS |
 | [Architecture](docs/ARCHITECTURE.md) | How the GUI is built, for contributors |
 | [Security](SECURITY.md) | Hardening advice and how to report a problem |
 

@@ -662,6 +662,7 @@ function showPage(page, { focus = false } = {}) {
       loadModifiers();
       loadLists();
       loadDiscord();
+      loadHealth();
       loadBot();
     }
     if (page === 'configs') loadConfigList();
@@ -3339,6 +3340,74 @@ async function testDiscord(which) {
   }
 }
 
+/* ---- Health alerts (cron on the VPS; API: /api/health) ---- */
+
+function renderHealth(h) {
+  $('hl-enabled').checked = h.enabled;
+  $('hl-minutes').value = String(h.minutes);
+  $('hl-live').checked = h.live;
+  $('hl-res').checked = h.res;
+  $('hl-disk').value = h.disk;
+  $('hl-mem').value = h.mem;
+  // Disk and memory belong to the whole VPS, so only the main world's job checks them.
+  for (const id of ['hl-res-wrap', 'hl-disk-wrap', 'hl-mem-wrap']) $(id).classList.toggle('hidden', !h.main);
+  const badge = $('hl-badge');
+  badge.className = `badge ${h.enabled ? (h.lastRun && !h.lastRun.ok ? 'warn' : 'good') : ''}`;
+  badge.textContent = h.enabled ? (h.lastRun && !h.lastRun.ok ? 'Problem seen' : 'On') : 'Off';
+  const bits = [];
+  if (!h.webhookSet) bits.push('No status webhook is set yet, so alerts have nowhere to go. Add one in the Discord notifications card above.');
+  if (!h.main) bits.push('Disk and memory are checked once for the whole VPS, by the main world.');
+  if (h.lastRun) bits.push(`Last check ${timeAgo(h.lastRun.ts)}: ${h.lastRun.message}`);
+  else if (h.enabled) bits.push('No check has run yet.');
+  $('hl-state').textContent = bits.join(' ');
+  $('hl-run').disabled = !h.enabled;
+}
+async function loadHealth() {
+  if (!$('hl-state')) return;
+  try {
+    renderHealth(await api('/api/health/schedule'));
+  } catch (e) {
+    $('hl-state').textContent = e.message;
+  }
+}
+async function saveHealth() {
+  const btn = $('hl-save');
+  setBtnLoading(btn, true);
+  try {
+    const r = await api('/api/health/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: $('hl-enabled').checked,
+        minutes: Number($('hl-minutes').value),
+        live: $('hl-live').checked,
+        res: $('hl-res').checked,
+        disk: Number($('hl-disk').value) || 85,
+        mem: Number($('hl-mem').value) || 10,
+      }),
+    });
+    renderHealth(r);
+    toast('success', r.enabled ? 'Health alerts are on' : 'Health alerts are off');
+  } catch (e) {
+    toast('error', 'Could not save health alerts', e.message);
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+async function runHealth() {
+  const btn = $('hl-run');
+  setBtnLoading(btn, true);
+  try {
+    const r = await api('/api/health/run', { method: 'POST' });
+    renderHealth(r);
+    toast(r.lastRun && r.lastRun.ok ? 'success' : 'info', 'Check finished', r.lastRun ? r.lastRun.message : undefined);
+  } catch (e) {
+    toast('error', 'Could not run the check', e.message);
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+
 /* ---- Discord /codes bot (API: /api/bot) ---- */
 
 let botSt = null;
@@ -3867,6 +3936,7 @@ async function loadWorlds() {
     return;
   }
   grid.innerHTML = r.instances.map(renderWorldCard).join('');
+  loadKept();
 }
 
 async function worldAction(id, action) {
@@ -3946,7 +4016,7 @@ async function removeWorld(id) {
   } catch (e) {
     /* the dialog still works without the size preview */
   }
-  const size = pv && pv.userExists ? `${pv.sizeMB >= 1024 ? (pv.sizeMB / 1024).toFixed(1) + ' GB' : pv.sizeMB + ' MB'} on disk, ${pv.saves} world save${pv.saves === 1 ? '' : 's'}, ${pv.backups} backup file${pv.backups === 1 ? '' : 's'}` : null;
+  const size = pv && pv.userExists ? `${pv.sizeMB >= 1024 ? (pv.sizeMB / 1024).toFixed(1) + ' GB' : pv.sizeMB + ' MB'} on disk, ${pv.saves} world${pv.saves === 1 ? '' : 's'}${pv.saves > pv.savedOnce ? ` (${pv.saves - pv.savedOnce} not saved yet)` : ''}, ${pv.backups} backup file${pv.backups === 1 ? '' : 's'}` : null;
   const res = await dialog({
     title: `Remove ${worldTitle(w)}?`,
     tone: 'danger',
@@ -3977,6 +4047,91 @@ async function removeWorld(id) {
     loadWorlds();
   } catch (e) {
     toast('error', 'Could not remove the world', e.message);
+  }
+}
+
+/* ---- Kept copies of deleted worlds (API: /api/kept-worlds) ---- */
+
+let keptItems = [];
+async function loadKept() {
+  const card = $('kept-card');
+  if (!card) return;
+  try {
+    const r = await api('/api/kept-worlds');
+    keptItems = r.items;
+  } catch (e) {
+    keptItems = [];
+  }
+  card.classList.toggle('hidden', !keptItems.length);
+  // Do not redraw while the person is choosing a target world.
+  if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('kept-target')) return;
+  const worlds = worldsCache || [];
+  $('kept-list').innerHTML = keptItems
+    .map((k, i) => {
+      const when = k.deletedAt ? new Date(k.deletedAt).toLocaleString() : '';
+      const size = k.sizeMB >= 1024 ? `${(k.sizeMB / 1024).toFixed(1)} GB` : `${k.sizeMB} MB`;
+      const what = [k.worlds.length ? `${pluralize(k.worlds.length, 'world')} (${k.worlds.map(esc).join(', ')})` : 'no world saves', pluralize(k.backups, 'backup file'), k.hasLists ? 'admin/ban lists' : null, size].filter(Boolean).join(', ');
+      return `<div class="kept-row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border, rgba(255,255,255,.08))">
+        <div style="flex:1;min-width:240px"><strong>${esc(k.from)}</strong> <span class="muted">deleted ${esc(when)}</span><div class="card-note" style="margin:2px 0 0">${what}</div></div>
+        <select class="input kept-target" id="kept-target-${i}" style="width:200px" aria-label="Restore into which world">${worlds.map((w) => `<option value="${esc(w.id)}">${esc(worldTitle(w))}${w.state === 'active' ? ' (running)' : ''}</option>`).join('')}</select>
+        ${k.hasLists ? `<label class="card-note" style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="kept-lists-${i}"> also admin/ban lists</label>` : ''}
+        <button class="btn btn-sm btn-primary" onclick="restoreKept(${i})">Restore into</button>
+        <button class="btn btn-sm" onclick="deleteKept(${i})">Delete copy</button>
+      </div>`;
+    })
+    .join('');
+}
+async function restoreKept(i, overwrite = false) {
+  const k = keptItems[i];
+  if (!k) return;
+  const target = $(`kept-target-${i}`).value;
+  const w = (worldsCache || []).find((x) => x.id === target);
+  if (!overwrite) {
+    const ok = await confirmDialog({
+      title: `Restore into ${w ? worldTitle(w) : target}?`,
+      tone: 'warn',
+      html: `<p>This copies the saved worlds from the kept copy of <strong>${esc(k.from)}</strong> into that world's save folder. The world must be stopped.</p>
+        <p>Nothing is overwritten unless you confirm it in the next step. Afterwards set <em>World name</em> in Settings to the name of the world you want it to load (${k.worlds.length ? k.worlds.map(esc).join(', ') : 'see the list above'}), then Start.</p>
+        <p class="muted">${$(`kept-lists-${i}`) && $(`kept-lists-${i}`).checked ? 'The admin, ban and whitelist files are restored too and replace the current ones (a safety copy is made first).' : 'The admin, ban and whitelist files are not restored.'}</p>`,
+      confirmLabel: 'Restore',
+    });
+    if (!ok) return;
+  }
+  try {
+    const r = await api('/api/kept-worlds/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: k.name, target, overwrite, lists: !!($(`kept-lists-${i}`) && $(`kept-lists-${i}`).checked) }) });
+    toast('success', 'Restored', `${r.worlds.join(', ')} is now in ${r.target}.${r.safetyCopy ? ' A safety copy of what was there is in its backups.' : ''} Set the World name in Settings, then start it.`);
+    recordEvent('accent', `Restored ${k.from}`, `into ${r.target}`, 'server');
+  } catch (e) {
+    if (/already exist/.test(e.message) && !overwrite) {
+      const go = await confirmDialog({
+        title: 'Replace existing worlds?',
+        tone: 'danger',
+        html: `<p>${esc(e.message)}</p><p>Continuing replaces them with the kept versions. A safety copy of the current saves is made first and put in that world's backups.</p>`,
+        confirmLabel: 'Replace them',
+      });
+      if (go) return restoreKept(i, true);
+      return;
+    }
+    toast('error', 'Could not restore', e.message);
+  }
+}
+async function deleteKept(i) {
+  const k = keptItems[i];
+  if (!k) return;
+  const res = await dialog({
+    title: `Delete the kept copy of ${k.from}?`,
+    tone: 'danger',
+    html: '<p>This permanently deletes the saved worlds, lists and backups in this copy from the VPS. <strong>It cannot be undone.</strong></p>',
+    input: { label: 'To enable the delete button, type <code>DELETE</code>', placeholder: 'DELETE', match: 'DELETE' },
+    actions: [{ key: 'delete', label: 'Delete the copy', variant: 'btn-danger', needsMatch: true }],
+  });
+  if (!res || res.key !== 'delete') return;
+  try {
+    await api(`/api/kept-worlds/${encodeURIComponent(k.name)}`, { method: 'DELETE' });
+    toast('success', 'Kept copy deleted');
+    loadKept();
+  } catch (e) {
+    toast('error', 'Could not delete it', e.message);
   }
 }
 

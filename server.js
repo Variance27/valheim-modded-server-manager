@@ -776,7 +776,11 @@ app.post('/api/server/:action', async (req, res) => {
     }
     // LinuxGSM colors its output; drop the escape codes (and its in-place "\r" redraws) so the console is readable.
     const clean = (t) => String(t || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '\n').replace(/\n{2,}/g, '\n');
+    const stopFlag = `${config.lgsmHome}/.stopped-by-gui`;
+    // A server stopped from here is a deliberate stop: the health check must not report it as a crash.
+    if (action === 'start') await sshExec(maybeSudo(`rm -f ${shq(stopFlag)}`));
     let r = await sshExec(asLgsmUser(`${shq(script)} ${action}`));
+    if (action === 'stop' && r.code === 0) await sshExec(maybeSudo(`touch ${shq(stopFlag)}`));
     let note = '';
     // LinuxGSM refuses to start when any file under its lgsm/ or serverfiles/ folder is not owned by
     // the game account (a backup or side file written as root is enough). Fixing that is what the
@@ -818,7 +822,7 @@ function inWorld(id, fn) {
 async function worldSummary(id) {
   return inWorld(id, async () => {
     const [st, w] = await Promise.all([
-      sshExec(`${stateSnippet()}; echo ---; [ -x ${shq(config.paths.lgsmScript)} ] && echo INSTALLED`),
+      sshExec(`${stateSnippet()}; echo ---; ${maybeSudo(`test -x ${shq(config.paths.lgsmScript)}`)} && echo INSTALLED`),
       getWorldInfo(),
     ]);
     const [stateBlock, rest] = st.stdout.split('---');
@@ -1016,7 +1020,10 @@ async function purgeTarget(entry) {
   const home = `/home/${acct}`;
   const cfgHome = await inWorld(id, async () => config.lgsmHome);
   if (cfgHome !== home) throw new Error(`This world's home folder is ${cfgHome}, not ${home}; refusing to delete anything automatically.`);
-  return { id, acct, home };
+  // Where this world's saves live (the same place the rest of the GUI reads them from); only trusted when it is inside the home folder.
+  const listDir = await inWorld(id, async () => config.paths.listDir);
+  const saveDir = listDir && listDir.startsWith(`${home}/`) && !/[\s'"$`\\;|&<>]/.test(listDir) && !listDir.includes('..') ? listDir : `${home}/.config/unity3d/IronGate/Valheim`;
+  return { id, acct, home, saveDir };
 }
 
 app.get('/api/instances/:id/uninstall-preview', async (req, res) => {
@@ -1029,12 +1036,144 @@ app.get('/api/instances/:id/uninstall-preview', async (req, res) => {
       'getent passwd "$ACCT" >/dev/null 2>&1 && echo "USER:1" || echo "USER:0"',
       '[ -d "$HOME_DIR" ] && echo "SIZE_MB:$(du -sm "$HOME_DIR" 2>/dev/null | cut -f1)" || echo "SIZE_MB:0"',
       'echo "BACKUPS:$(ls -1 "$HOME_DIR/backups" 2>/dev/null | wc -l)"',
-      'echo "WORLDS:$(ls -1 "$HOME_DIR/.config/unity3d/IronGate/Valheim/worlds_local" 2>/dev/null | grep -c "\\.db$")"',
+      `V=${shq(t.saveDir)}`,
+      // A world exists as soon as its .fwl is written (first start); the .db appears after the first save.
+      'echo "WORLDS:$(ls -1 "$V/worlds_local" "$V/worlds" 2>/dev/null | grep -E "\\.(db|fwl)$" | sed -E "s/\\.(db|fwl)$//" | sort -u | wc -l)"',
+      'echo "SAVED:$(ls -1 "$V/worlds_local" "$V/worlds" 2>/dev/null | grep -E "\\.db$" | sed -E "s/\\.db$//" | sort -u | wc -l)"',
       'echo "PROCS:$(pgrep -u "$ACCT" 2>/dev/null | wc -l)"',
     ].join('\n');
     const r = await sshExec(asRootScript(script));
     const get = (k) => Number((new RegExp(`${k}:(\\d+)`).exec(r.stdout) || [])[1] || 0);
-    res.json({ account: t.acct, home: t.home, userExists: get('USER') === 1, sizeMB: get('SIZE_MB'), backups: get('BACKUPS'), saves: get('WORLDS'), processes: get('PROCS') });
+    res.json({ account: t.acct, home: t.home, userExists: get('USER') === 1, sizeMB: get('SIZE_MB'), backups: get('BACKUPS'), saves: get('WORLDS'), savedOnce: get('SAVED'), processes: get('PROCS') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Kept copies of deleted worlds (API: /api/kept-worlds) ----
+// "Delete, keep a copy" leaves the saves, lists and backups of a deleted world under KEPT_WORLDS_DIR.
+// These endpoints list them, restore one into any world, or delete one for good.
+const KEPT_NAME_RE = /^[a-z][a-z0-9]{0,9}-\d{14}$/;
+
+app.get('/api/kept-worlds', async (req, res) => {
+  try {
+    const script = [
+      `KEPT=${shq(KEPT_WORLDS_DIR)}`,
+      '[ -d "$KEPT" ] || exit 0',
+      'for d in "$KEPT"/*/; do',
+      '  [ -d "$d" ] || continue',
+      '  n=$(basename "$d")',
+      `  echo "$n" | grep -Eq '^[a-z][a-z0-9]{0,9}-[0-9]{14}$' || continue`,
+      '  size=$(du -sm "$d" 2>/dev/null | cut -f1)',
+      '  b=$(ls -1 "$d/backups" 2>/dev/null | wc -l)',
+      `  w=$(ls -1 "$d/worlds_local" "$d/worlds" 2>/dev/null | grep -E '\\.(db|fwl)$' | sed -E 's/\\.(db|fwl)$//' | sort -u | paste -sd, -)`,
+      '  l=0; for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$d/$f" ] && l=1; done',
+      '  echo "ENTRY|$n|${size:-0}|$b|$w|$l"',
+      'done',
+      'true',
+    ].join('\n');
+    const r = await sshExec(asRootScript(script));
+    const items = [];
+    for (const line of r.stdout.split('\n')) {
+      const m = /^ENTRY\|([^|]+)\|(\d+)\|(\d+)\|([^|]*)\|([01])$/.exec(line.trim());
+      if (!m || !KEPT_NAME_RE.test(m[1])) continue;
+      const st = /-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(m[1]);
+      items.push({
+        name: m[1],
+        from: m[1].replace(/-\d{14}$/, ''),
+        deletedAt: st ? `${st[1]}-${st[2]}-${st[3]}T${st[4]}:${st[5]}:${st[6]}Z` : null,
+        sizeMB: Number(m[2]),
+        backups: Number(m[3]),
+        worlds: m[4] ? m[4].split(',') : [],
+        hasLists: m[5] === '1',
+      });
+    }
+    items.sort((a, b) => (b.name > a.name ? 1 : -1));
+    res.json({ dir: KEPT_WORLDS_DIR, items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/kept-worlds/restore', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = String(b.name || '');
+    const target = String(b.target || '');
+    if (!KEPT_NAME_RE.test(name)) return res.status(400).json({ error: 'Unknown kept copy.' });
+    if (!worldList().includes(target)) return res.status(400).json({ error: `Unknown world "${target}".` });
+    const overwrite = b.overwrite === true;
+    const lists = b.lists === true;
+    const t = await inWorld(target, async () => ({
+      user: config.lgsmUser,
+      home: config.lgsmHome,
+      listDir: config.paths.listDir,
+      backupDir: config.paths.backupDir,
+      label: config.instance.label,
+    }));
+    if (!t.user || !/^[a-z_][a-z0-9_-]*$/.test(t.user) || !t.home || !t.listDir || !t.backupDir) return res.status(400).json({ error: 'That world has no game account or save folder yet. Run its Setup first.' });
+    if (!t.listDir.startsWith(`${t.home}/`) || /[\s'"$`\;|&<>]/.test(`${t.listDir}${t.backupDir}`) || t.listDir.includes('..')) return res.status(400).json({ error: 'That world uses a save folder this GUI will not write to automatically.' });
+    const script = [
+      'set -u',
+      `SRC=${shq(`${KEPT_WORLDS_DIR}/${name}`)}; V=${shq(t.listDir)}; U=${shq(t.user)}; BK=${shq(t.backupDir)}; OVER=${overwrite ? 1 : 0}; LISTS=${lists ? 1 : 0}`,
+      '[ -d "$SRC" ] || { echo "[error] that kept copy no longer exists"; exit 2; }',
+      'id -u "$U" >/dev/null 2>&1 || { echo "[error] the game account $U does not exist"; exit 2; }',
+      `if pgrep -u "$U" -f '^\\./valheim_server\\.x86_64' >/dev/null 2>&1; then echo "[running] stop this world first"; exit 4; fi`,
+      'NEW=0; COLL=""',
+      'if [ -d "$SRC/worlds_local" ]; then',
+      '  for f in "$SRC"/worlds_local/*; do [ -e "$f" ] || continue; bn=$(basename "$f"); if [ -e "$V/worlds_local/$bn" ]; then COLL="$COLL $bn"; fi; done',
+      'fi',
+      'if [ -n "$COLL" ] && [ "$OVER" != 1 ]; then echo "[collision]$COLL"; exit 3; fi',
+      '[ -d "$SRC/worlds_local" ] || [ -d "$SRC/worlds" ] || [ "$LISTS" = 1 ] || { echo "[error] this kept copy has no world saves"; exit 2; }',
+      'mkdir -p "$V/worlds_local" "$BK"',
+      'STAMP=$(date +%Y%m%d-%H%M%S)',
+      'ITEMS=""',
+      '[ -d "$V/worlds_local" ] && [ -n "$(ls -A "$V/worlds_local" 2>/dev/null)" ] && ITEMS="worlds_local"',
+      'if [ "$LISTS" = 1 ]; then for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$V/$f" ] && ITEMS="$ITEMS $f"; done; fi',
+      'SAFE=""',
+      'if [ -n "$ITEMS" ]; then',
+      '  SAFE="$BK/PRE-IMPORT-$STAMP.tar.gz"',
+      '  tar -czf "$SAFE" -C "$V" $ITEMS && tar -tzf "$SAFE" >/dev/null || { echo "[error] could not make the safety copy; nothing was changed"; exit 5; }',
+      '  chown "$U:$U" "$SAFE"; echo "[note] safety copy of what was there: $SAFE"',
+      'fi',
+      'if [ -d "$SRC/worlds_local" ]; then cp -a "$SRC/worlds_local/." "$V/worlds_local/" || { echo "[error] copy failed"; exit 6; }; fi',
+      'if [ -d "$SRC/worlds" ]; then mkdir -p "$V/worlds"; cp -a "$SRC/worlds/." "$V/worlds/" || { echo "[error] copy failed"; exit 6; }; fi',
+      'if [ "$LISTS" = 1 ]; then for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$SRC/$f" ] && cp -a "$SRC/$f" "$V/$f"; done; fi',
+      'chown -R "$U:$U" "$V/worlds_local" 2>/dev/null; [ -d "$V/worlds" ] && chown -R "$U:$U" "$V/worlds"',
+      'if [ "$LISTS" = 1 ]; then for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$V/$f" ] && chown "$U:$U" "$V/$f"; done; fi',
+      `NAMES=$(ls -1 "$SRC/worlds_local" "$SRC/worlds" 2>/dev/null | grep -E '\\.(db|fwl)$' | sed -E 's/\\.(db|fwl)$//' | sort -u | paste -sd, -)`,
+      'echo "[done] $NAMES"',
+      'echo "[safe] $SAFE"',
+    ].join('\n');
+    const r = await sshExec(asRootScript(script));
+    const out = `${r.stdout || ''}${r.stderr || ''}`;
+    const coll = /\[collision\]\s*(.*)/.exec(out);
+    if (coll) return res.status(409).json({ error: `These already exist in ${t.label}: ${coll[1].trim().split(/\s+/).join(', ')}.`, collision: true, files: coll[1].trim().split(/\s+/) });
+    if (/\[running\]/.test(out)) return res.status(409).json({ error: `${t.label} is running. Stop it first.` });
+    const done = /\[done\]\s*(.*)/.exec(out);
+    if (!done || r.code) return res.status(500).json({ error: out.split('\n').filter((l) => /\[error\]/.test(l)).join(' ') || out.trim() || 'restore failed' });
+    const names = done[1].split(',').filter(Boolean);
+    const safe = ((/\[safe\]\s*(.*)/.exec(out) || [])[1] || '').trim() || null;
+    res.json({ ok: true, target: t.label, worlds: names, safetyCopy: safe });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/kept-worlds/:name', async (req, res) => {
+  try {
+    const name = String(req.params.name || '');
+    if (!KEPT_NAME_RE.test(name)) return res.status(400).json({ error: 'Unknown kept copy.' });
+    const script = [
+      `KEPT=${shq(KEPT_WORLDS_DIR)}; D="$KEPT/"${shq(name)}`,
+      '[ -d "$D" ] || { echo "[error] already gone"; exit 2; }',
+      'case "$(readlink -f "$D")" in "$KEPT"/*) rm -rf -- "$D" ;; *) echo "[error] unexpected path"; exit 3 ;; esac',
+      '[ -e "$D" ] && { echo "[error] could not delete it"; exit 4; }',
+      'echo DELETED',
+    ].join('\n');
+    const r = await sshExec(asRootScript(script));
+    if (!r.stdout.includes('DELETED')) return res.status(500).json({ error: (r.stdout + r.stderr).split('\n').filter((l) => /\[error\]/.test(l)).join(' ') || 'could not delete it' });
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1056,6 +1195,7 @@ async function purgeWorldHost(entry, keepCopy) {
     `${P.lockDir}/valheim-scheduled-backup${sfx}.lock`,
     `${P.stateDir}/valheim-scheduled-backup${sfx}.pending`,
     `${P.stateDir}/valheim-update-check${sfx}.state`,
+    ...healthFiles(P, sfx),
   ];
   const script = [
     'set -u',
@@ -1076,9 +1216,10 @@ async function purgeWorldHost(entry, keepCopy) {
     'if [ "$KEEP" = 1 ] && [ -d "$HOME_DIR" ]; then',
     '  echo "[step] Keeping a copy of the saves and backups in $KEEPDIR ..."',
     '  mkdir -p "$KEEPDIR" || { echo "[error] cannot create $KEEPDIR"; exit 6; }',
-    '  V="$HOME_DIR/.config/unity3d/IronGate/Valheim"',
+    `  V=${shq(t.saveDir)}`,
     '  if [ -d "$HOME_DIR/backups" ]; then cp -a "$HOME_DIR/backups" "$KEEPDIR/backups" || { echo "[error] could not copy the backups"; exit 6; }; fi',
     '  if [ -d "$V/worlds_local" ]; then cp -a "$V/worlds_local" "$KEEPDIR/worlds_local" || { echo "[error] could not copy the world saves"; exit 6; }; fi',
+    '  if [ -d "$V/worlds" ]; then cp -a "$V/worlds" "$KEEPDIR/worlds" || { echo "[error] could not copy the world saves"; exit 6; }; fi',
     '  for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$V/$f" ] && cp -a "$V/$f" "$KEEPDIR/"; done',
     '  chmod -R go-rwx "$KEEPDIR"',
     '  if [ -n "$(ls -A "$KEEPDIR" 2>/dev/null)" ]; then echo "[note] copy kept in $KEEPDIR"; else rmdir "$KEEPDIR" 2>/dev/null; echo "[note] nothing to keep: this world had no saves or backups"; fi',
@@ -1122,6 +1263,11 @@ app.delete('/api/instances/:id', async (req, res) => {
         } catch (e) {
           /* nothing scheduled */
         }
+      }
+      try {
+        await installHealthJob({ enabled: false });
+      } catch (e) {
+        /* nothing scheduled */
       }
     });
     // Uninstalling happens BEFORE the world is forgotten, so a failure leaves it listed and retryable.
@@ -1537,7 +1683,9 @@ app.post('/api/backup/restore', async (req, res) => {
     `echo "RESTORED ${file}"`,
     `echo "Previous world kept as: \${SAFE:-none}"`,
   ].join(' && ');
-  sshExecPlainStream(cmd, res);
+  // The health check stays quiet while a restore has the server down on purpose; the flag is removed however the restore ends.
+  const flag = `${config.lgsmHome}/.maintenance`;
+  sshExecPlainStream(`${maybeSudo(`touch ${shq(flag)}`)}; { ${cmd}; }; RC=$?; ${maybeSudo(`rm -f ${shq(flag)}`)}; exit $RC`, res);
 });
 
 // ---- Scheduled backups + update checks (real cron jobs on the VPS) ----
@@ -1827,6 +1975,179 @@ app.post('/api/update/schedule', async (req, res) => {
   }
 });
 
+// ---- Health alerts: server down, disk and memory (cron job per world; API: /api/health) ----
+//
+// One small wrapper script per world, run by cron every few minutes whether or not the GUI is open. It
+// posts to the status Discord channel. A server stopped from the GUI (or by a backup, update or restore)
+// is treated as deliberate. Disk and memory belong to the whole VPS, so only the main world's job checks
+// them (otherwise every world would send the same alert).
+const HEALTH_INTERVALS = [5, 10, 15, 30, 60];
+
+function healthJob() {
+  const sfx = instSfx();
+  const idx = curId() === 'main' ? 0 : readRegistry().findIndex((i) => i.id === curId()) + 1;
+  return {
+    file: `valheim-gui-health${sfx}`,
+    script: `valheim-health-check${sfx}.sh`,
+    status: `valheim-health-check${sfx}.status`,
+    stateBase: `valheim-health${sfx}`,
+    minute: (idx * 2 + 3) % 60,
+  };
+}
+
+function buildHealthWrapper(P, o) {
+  const j = healthJob();
+  const user = config.lgsmUser || 'vhserver';
+  const state = `${P.stateDir}/${j.stateBase}`;
+  return [
+    '#!/bin/bash',
+    '# Managed by valheim-gui. Regenerated every time you save the health alerts.',
+    `WEBHOOK=${shq(statusWebhook())}`,
+    `LGSM_USER=${shq(user)}`,
+    `LGSM_HOME=${shq(config.lgsmHome)}`,
+    `STATE=${shq(state)}`,
+    `STATUS=${shq(`${P.logDir}/${j.status}`)}`,
+    `CHECK_LIVE=${o.live ? 1 : 0}`,
+    `CHECK_RES=${o.res ? 1 : 0}`,
+    `DISK_WARN=${o.disk}`,
+    `MEM_WARN=${o.mem}`,
+    'GRACE=120; REALERT=3600',
+    `notify() { [ -n "$WEBHOOK" ] && curl -s -m 15 -H "Content-Type: application/json" -d "{\\"content\\":\\"${worldTag()}$1\\"}" "$WEBHOOK" >/dev/null 2>&1; }`,
+    'now=$(date +%s)',
+    'problems=""',
+    'throttled() { local f="$STATE.$1" last=0; [ -f "$f" ] && last=$(cat "$f" 2>/dev/null || echo 0); if [ $((now - last)) -ge $REALERT ]; then echo "$now" > "$f"; return 0; fi; return 1; }',
+    '',
+    'if [ "$CHECK_LIVE" = 1 ]; then',
+    '  if [ -f "$LGSM_HOME/.maintenance" ] || [ -f "$LGSM_HOME/.stopped-by-gui" ]; then',
+    '    rm -f "$STATE.down" "$STATE.live"   # stopped on purpose: nothing to report',
+    "  elif pgrep -u \"$LGSM_USER\" -f '^\\./valheim_server\\.x86_64' >/dev/null 2>&1; then",
+    '    if [ -f "$STATE.live" ]; then notify "Valheim server is back up. ($(hostname))"; fi',
+    '    rm -f "$STATE.down" "$STATE.live"',
+    '  else',
+    '    [ -f "$STATE.down" ] || echo "$now" > "$STATE.down"',
+    '    since=$(cat "$STATE.down" 2>/dev/null || echo "$now")',
+    '    if [ $((now - since)) -ge $GRACE ]; then',
+    '      problems="$problems server down;"',
+    '      throttled live && notify "Valheim server is DOWN: no game process is running and it was not stopped from the GUI. Start it from the GUI or check the log. ($(hostname))"',
+    '    fi',
+    '  fi',
+    'fi',
+    '',
+    'if [ "$CHECK_RES" = 1 ]; then',
+    '  used=$(df --output=pcent "$LGSM_HOME" 2>/dev/null | tail -n1 | tr -dc 0-9)',
+    '  if [ -n "$used" ] && [ "$used" -ge "$DISK_WARN" ]; then',
+    '    problems="$problems disk ${used}%;"',
+    '    throttled disk && notify "Disk usage is high on the VPS: ${used}% used (alert at ${DISK_WARN}%). Lower the backup retention or free some space. ($(hostname))"',
+    '  else rm -f "$STATE.disk"; fi',
+    "  tot=$(awk '/MemTotal/{print $2}' /proc/meminfo); av=$(awk '/MemAvailable/{print $2}' /proc/meminfo)",
+    '  if [ -n "$tot" ] && [ "$tot" -gt 0 ] && [ -n "$av" ]; then',
+    '    pct=$((av * 100 / tot))',
+    '    if [ "$pct" -le "$MEM_WARN" ]; then',
+    '      problems="$problems memory ${pct}% free;"',
+    '      throttled mem && notify "Available memory is low on the VPS: ${pct}% free (alert at ${MEM_WARN}%). This can cause out-of-memory crashes; consider more RAM or swap. ($(hostname))"',
+    '    else rm -f "$STATE.mem"; fi',
+    '  fi',
+    'fi',
+    '',
+    'if [ -z "$problems" ]; then echo "$(date +%s)|ok|All checks passed." > "$STATUS"; else echo "$(date +%s)|fail|Problems:$problems" > "$STATUS"; fi',
+    '',
+  ].join('\n');
+}
+
+function parseHealthSettings(cronText) {
+  const m = /# valheim-gui: minutes=(\d+) live=([01]) res=([01]) disk=(\d+) mem=(\d+)/.exec(cronText || '');
+  return m ? { enabled: true, minutes: Number(m[1]), live: m[2] === '1', res: m[3] === '1', disk: Number(m[4]), mem: Number(m[5]) } : null;
+}
+
+async function readHealthJob() {
+  const P = cronPaths();
+  const j = healthJob();
+  const r = await sshExec(`cat ${shq(`${P.cronDir}/${j.file}`)} 2>/dev/null; echo ---STATUS---; cat ${shq(`${P.logDir}/${j.status}`)} 2>/dev/null`);
+  const [cronText, statusText] = r.stdout.split('---STATUS---');
+  const parsed = parseHealthSettings(cronText);
+  const out = { enabled: false, minutes: 15, live: true, res: !!config.instance.main, disk: 85, mem: 10, lastRun: null, main: !!config.instance.main, webhookSet: !!statusWebhook(), ...(parsed || {}) };
+  const s = (statusText || '').trim().split('|');
+  if (s.length >= 3 && /^\d+$/.test(s[0])) out.lastRun = { ts: Number(s[0]) * 1000, ok: s[1] === 'ok', message: s.slice(2).join('|') };
+  return out;
+}
+
+async function installHealthJob(o) {
+  const P = cronPaths();
+  const j = healthJob();
+  const cronPath = `${P.cronDir}/${j.file}`;
+  const scriptPath = `${P.binDir}/${j.script}`;
+  if (!o.enabled) {
+    await sshExec(`${maybeSudo(`rm -f ${shq(cronPath)} ${shq(scriptPath)}`)}; echo DONE`);
+    return;
+  }
+  const chk = await sshExec(`[ -d ${shq(P.cronDir)} ] && echo HAVE_CRON_D; (command -v cron || command -v crond) >/dev/null 2>&1 && echo HAVE_CRON`);
+  if (!chk.stdout.includes('HAVE_CRON_D') || !chk.stdout.includes('HAVE_CRON')) {
+    throw new Error('cron is not installed on the VPS (run: sudo apt install cron && sudo systemctl enable --now cron)');
+  }
+  await writeRootFile(scriptPath, buildHealthWrapper(P, o), '700');
+  const expr = o.minutes >= 60 ? `${j.minute} * * * *` : `${j.minute % o.minutes}-59/${o.minutes} * * * *`;
+  const cron = [
+    `# valheim-gui: minutes=${o.minutes} live=${o.live ? 1 : 0} res=${o.res ? 1 : 0} disk=${o.disk} mem=${o.mem}`,
+    '# Managed by the valheim-gui dashboard. Edit it there, or delete this file to stop it.',
+    'SHELL=/bin/bash',
+    'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    `${expr} root ${scriptPath}`,
+    '',
+  ].join('\n');
+  await writeRootFile(cronPath, cron, '644');
+}
+
+// Every VPS-side file the health job owns (used when a world is uninstalled).
+function healthFiles(P, sfx) {
+  return [
+    `${P.cronDir}/valheim-gui-health${sfx}`,
+    `${P.binDir}/valheim-health-check${sfx}.sh`,
+    `${P.logDir}/valheim-health-check${sfx}.status`,
+    ...['down', 'live', 'disk', 'mem'].map((k) => `${P.stateDir}/valheim-health${sfx}.${k}`),
+  ];
+}
+
+app.get('/api/health/schedule', async (req, res) => {
+  try {
+    res.json({ ...(await readHealthJob()), serverTime: Date.now() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/health/schedule', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const minutes = Number(b.minutes);
+    if (!HEALTH_INTERVALS.includes(minutes)) return res.status(400).json({ error: `minutes must be one of ${HEALTH_INTERVALS.join(', ')}` });
+    // Disk and memory are VPS-wide, so only the main world's job uses them; other worlds keep the defaults.
+    const checksRes = !!config.instance.main && b.res !== false;
+    const disk = checksRes ? Number(b.disk) : 85;
+    const mem = checksRes ? Number(b.mem) : 10;
+    if (!Number.isInteger(disk) || disk < 50 || disk > 99) return res.status(400).json({ error: 'The disk threshold must be a whole number from 50 to 99 (percent used).' });
+    if (!Number.isInteger(mem) || mem < 3 || mem > 50) return res.status(400).json({ error: 'The memory threshold must be a whole number from 3 to 50 (percent still free).' });
+    const o = { enabled: !!b.enabled, minutes, live: b.live !== false, res: !!config.instance.main && b.res !== false, disk, mem };
+    if (o.enabled && !o.live && !o.res) return res.status(400).json({ error: 'Turn on at least one check.' });
+    await installHealthJob(o);
+    res.json({ ...(await readHealthJob()), serverTime: Date.now() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/health/run', async (req, res) => {
+  try {
+    const cur = await readHealthJob();
+    if (!cur.enabled) return res.status(400).json({ error: 'Turn the health alerts on first.' });
+    const P = cronPaths();
+    const j = healthJob();
+    await sshExec(asRootScript(`bash ${shq(`${P.binDir}/${j.script}`)}`));
+    res.json({ ...(await readHealthJob()), serverTime: Date.now() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Discord webhooks (API: /api/discord) ----
 function maskWebhook(u) {
   const m = /\/webhooks\/(\d+)\//.exec(u || '');
@@ -1848,13 +2169,18 @@ function discordState() {
 // update-check and update scripts when you run them by hand).
 async function applyStatusWebhookToWorld() {
   const done = [];
-  const here = await sshExec(`[ -x ${shq(config.paths.lgsmScript)} ] && echo YES`);
+  const here = await sshExec(`${maybeSudo(`test -x ${shq(config.paths.lgsmScript)}`)} && echo YES`);
   if (!here.stdout.includes('YES')) return 'not installed yet, skipped';
   for (const kind of ['backup', 'update']) {
     const cur = await readCronJob(kind);
     if (!cur.enabled) continue;
     await installCronJob(kind, true, cur.intervalHours, cur.onlyWhenEmpty);
     done.push(`${kind} schedule refreshed`);
+  }
+  const health = await readHealthJob();
+  if (health.enabled) {
+    await installHealthJob(health);
+    done.push('health alerts refreshed');
   }
   const url = statusWebhook();
   const f = `${config.lgsmHome}/.config/valheim-notify.conf`;
@@ -4748,7 +5074,8 @@ app.get('/api/setup/status', async (req, res) => {
         `if [ -n "$SE" ] && [ -n "$(find ${shq(p.commonCfgPath)} ${shq(p.pluginsDir)} -newermt "@$SE" -print -quit 2>/dev/null)" ]; then echo "NEEDS_RESTART:yes"; else echo "NEEDS_RESTART:no"; fi; ` +
         `else echo "SERVER_STATE:inactive"; echo "NEEDS_RESTART:no"; fi`,
     ];
-    const r = await sshExec(checks.join('\n'));
+    // Read as root: a game account's home folder is mode 750 on current Ubuntu/Debian, so a sudo user could not even see inside it.
+    const r = await sshExec(asRootScript(checks.join('\n')));
     const st = {};
     r.stdout.split('\n').forEach((line) => {
       const idx = line.indexOf(':');
