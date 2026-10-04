@@ -1,0 +1,24 @@
+# Secrets and per-install state: never commit these
+config.json
+auth.json
+instances.json
+.cache/
+
+# Dependencies and logs
+node_modules/
+npm-debug.log*
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Backups the GUI and setup scripts make next to files
+*.bak
+*.bak.*

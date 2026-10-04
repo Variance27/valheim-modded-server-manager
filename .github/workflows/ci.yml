@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: JavaScript syntax
+        run: npm run check
+      - name: Shell script syntax
+        run: for f in vps-scripts/*.sh; do bash -n "$f"; done
+      - name: Python syntax
+        run: python3 -m py_compile vps-scripts/*.py
+      - name: No secrets or personal config committed
+        run: |
+          for f in config.json auth.json instances.json; do
+            if [ -e "$f" ]; then echo "$f must not be committed"; exit 1; fi
+          done

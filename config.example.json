@@ -1,0 +1,10 @@
+{
+  "ssh": {
+    "host": "YOUR.VPS.IP",
+    "port": 22,
+    "username": "root",
+    "password": "your-vps-password"
+  },
+  "guiPort": 4173,
+  "publicHost": "YOUR.VPS.IP"
+}

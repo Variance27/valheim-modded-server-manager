@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>Valheim · Server Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+  // Apply saved theme / sidebar state before first paint (no flash).
+  try {
+    var t = localStorage.getItem('vg.theme'); if (t) document.documentElement.dataset.theme = t;
+    if (localStorage.getItem('vg.sidebar') === 'collapsed') document.documentElement.classList.add('sb-collapsed');
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<!-- ============ Icon sprite ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M19.4 11.2a2.3 2.3 0 1 0 0-4.4V4.5A1.5 1.5 0 0 0 17.9 3h-3.2a2.3 2.3 0 1 0-4.4 0H7.1a1.5 1.5 0 0 0-1.5 1.5v3.2a2.3 2.3 0 1 0 0 4.4v3.2"/><path d="M5.6 15.3v4.2A1.5 1.5 0 0 0 7.1 21h3.2a2.3 2.3 0 1 1 4.4 0h3.2a1.5 1.5 0 0 0 1.5-1.5v-3.2a2.3 2.3 0 1 0 0-4.4"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M10 13h4"/></symbol>
+    <symbol id="i-download-cloud" viewBox="0 0 24 24"><path d="M12 13v8"/><path d="m8.5 17.5 3.5 3.5 3.5-3.5"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 8 4 4-4 4"/><path d="M12 17h7"/><rect x="2" y="3" width="20" height="18" rx="2" opacity=".0"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15a.8.8 0 0 0 1.2.7l12-7.5a.8.8 0 0 0 0-1.4l-12-7.5A.8.8 0 0 0 7 4.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3"/><rect x="2" y="6" width="20" height="10" rx="1.5"/><path d="M8 10v2M12 10v2M16 10v2"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><path d="M22 12H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/><path d="M6 16h.01M10 16h.01"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.9 4.2A10 10 0 0 1 12 4c7 0 10 8 10 8a13 13 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13 13 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7 12 12l8.7-5"/><path d="M12 22V12"/></symbol>
+    <symbol id="i-arrow-up-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></symbol>
+    <symbol id="i-command" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></symbol>
+    <symbol id="i-wrap" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-scroll-down" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M5 20h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M5 20 14.5 10.5"/><path d="M13 4.5 19.5 11l-2.8 2.8-6.5-6.5z"/><path d="m16.2 7.8 3.3-3.3"/></symbol>
+  </defs>
+</svg>
+
+<a class="skip-link" href="#content">Skip to content</a>
+
+<div class="app">
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar" id="sidebar" aria-label="Primary">
+    <div class="sb-brand">
+      <div class="sb-logo" aria-hidden="true"><svg class="i"><use href="#i-logo"/></svg></div>
+      <div class="sb-brand-text">
+        <div class="sb-brand-name" id="sb-brand-name">Valheim</div>
+        <div class="sb-brand-sub" id="sb-brand-sub">Valheim · Dedicated</div>
+      </div>
+    </div>
+
+    <div class="game-switch" role="tablist" aria-label="Active server">
+      <button type="button" class="game-switch-btn active" data-game="valheim" onclick="setActiveGame('valheim')" role="tab" aria-selected="true">
+        <svg class="i"><use href="#i-server"/></svg>Valheim
+      </button>
+      <button type="button" class="game-switch-btn" data-game="zomboid" onclick="setActiveGame('zomboid')" role="tab" aria-selected="false">
+        <svg class="i"><use href="#i-server"/></svg>Zomboid
+      </button>
+    </div>
+
+    <div class="world-switch hidden" id="world-switch">
+      <label for="world-select">World</label>
+      <select id="world-select" onchange="switchWorld(this.value)" aria-label="Active world"></select>
+    </div>
+
+    <nav class="sb-nav">
+      <div class="game-valheim">
+        <div class="sb-section-label">Overview</div>
+        <a href="#dashboard" class="sb-item" data-page="dashboard" data-tip="Dashboard" data-tip-side="right"><svg class="i"><use href="#i-grid"/></svg><span>Dashboard</span></a>
+        <a href="#logs" class="sb-item" data-page="logs" data-tip="Logs" data-tip-side="right"><svg class="i"><use href="#i-terminal"/></svg><span>Logs</span><span class="sb-live-dot hidden" id="sb-live-dot" aria-label="live"></span></a>
+        <a href="#worlds" class="sb-item" data-page="worlds" data-tip="Worlds" data-tip-side="right"><svg class="i"><use href="#i-server"/></svg><span>Worlds</span><span class="sb-count hidden" id="sb-worlds-count"></span></a>
+
+        <div class="sb-section-label">Content</div>
+        <a href="#mods" class="sb-item" data-page="mods" data-tip="Mods" data-tip-side="right"><svg class="i"><use href="#i-puzzle"/></svg><span>Mods</span><span class="sb-count hidden" id="sb-updates-count" data-tip="Updates available" data-tip-side="right"></span></a>
+        <a href="#configs" class="sb-item" data-page="configs" data-tip="Mod configs" data-tip-side="right"><svg class="i"><use href="#i-wrench"/></svg><span>Mod configs</span></a>
+
+        <div class="sb-section-label">Operations</div>
+        <a href="#backups" class="sb-item" data-page="backups" data-tip="Backups" data-tip-side="right"><svg class="i"><use href="#i-archive"/></svg><span>Backups</span></a>
+        <a href="#updates" class="sb-item" data-page="updates" data-tip="Server updates" data-tip-side="right"><svg class="i"><use href="#i-download-cloud"/></svg><span>Updates</span></a>
+        <a href="#settings" class="sb-item" data-page="settings" data-tip="Server settings" data-tip-side="right"><svg class="i"><use href="#i-shield"/></svg><span>Settings</span></a>
+        <a href="#setup" class="sb-item" data-page="setup" data-tip="First-time setup" data-tip-side="right"><svg class="i"><use href="#i-wrench"/></svg><span>Setup</span><span class="sb-count hidden" id="sb-setup-count"></span></a>
+      </div>
+      <div class="game-zomboid">
+        <div class="sb-section-label">Overview</div>
+        <a href="#pz-dashboard" class="sb-item" data-page="pz-dashboard" data-tip="Dashboard" data-tip-side="right"><svg class="i"><use href="#i-grid"/></svg><span>Dashboard</span></a>
+        <a href="#pz-logs" class="sb-item" data-page="pz-logs" data-tip="Logs" data-tip-side="right"><svg class="i"><use href="#i-terminal"/></svg><span>Logs</span><span class="sb-live-dot hidden" id="pz-sb-live-dot" aria-label="live"></span></a>
+
+        <div class="sb-section-label">Content</div>
+        <a href="#pz-mods" class="sb-item" data-page="pz-mods" data-tip="Mods" data-tip-side="right"><svg class="i"><use href="#i-puzzle"/></svg><span>Mods</span></a>
+
+        <div class="sb-section-label">Operations</div>
+        <a href="#pz-backups" class="sb-item" data-page="pz-backups" data-tip="Backups" data-tip-side="right"><svg class="i"><use href="#i-archive"/></svg><span>Backups</span></a>
+        <a href="#pz-updates" class="sb-item" data-page="pz-updates" data-tip="Server updates" data-tip-side="right"><svg class="i"><use href="#i-download-cloud"/></svg><span>Updates</span></a>
+      </div>
+    </nav>
+
+    <div class="sb-footer">
+      <button class="sb-item sb-btn" id="logout-btn" type="button" onclick="logout()" data-tip="Sign out" data-tip-side="right">
+        <svg class="i"><use href="#i-power"/></svg><span>Sign out</span>
+      </button>
+      <button class="sb-item sb-btn" id="theme-toggle" type="button" data-tip="Toggle theme" data-tip-side="right">
+        <svg class="i theme-icon-dark"><use href="#i-moon"/></svg><svg class="i theme-icon-light"><use href="#i-sun"/></svg><span>Theme</span>
+      </button>
+      <button class="sb-item sb-btn" id="sidebar-collapse" type="button" data-tip="Collapse sidebar  [" data-tip-side="right" aria-label="Collapse sidebar">
+        <svg class="i"><use href="#i-sidebar"/></svg><span>Collapse</span>
+      </button>
+    </div>
+  </aside>
+  <div class="sb-scrim" id="sb-scrim"></div>
+
+  <!-- ============ Main ============ -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="sidebar-open" type="button" aria-label="Open navigation"><svg class="i"><use href="#i-menu"/></svg></button>
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <span class="crumb-root" id="crumb-root">Valheim</span>
+        <svg class="i crumb-sep"><use href="#i-chevron-right"/></svg>
+        <span class="crumb-page" id="crumb-page">Dashboard</span>
+      </nav>
+
+      <button class="cmdk-trigger" id="cmdk-open" type="button" aria-label="Open command palette">
+        <svg class="i"><use href="#i-search"/></svg><span>Search or run a command…</span><kbd>Ctrl K</kbd>
+      </button>
+
+      <div class="topbar-right">
+        <div class="status-group" role="status" aria-live="polite">
+          <div class="status-chip" data-tip="Valheim process state, via LGSM (no systemd unit anymore)">
+            <span class="status-chip-label">Instance</span>
+            <div id="status-pill" class="pill unknown">checking…</div>
+          </div>
+          <div class="status-chip" data-tip="Whether the game's UDP port is actually listening for players">
+            <span class="status-chip-label">Server</span>
+            <div id="port-pill" class="pill unknown">checking…</div>
+          </div>
+        </div>
+        <button class="icon-btn has-badge" id="pending-indicator" type="button" data-tip="Pending changes for Discord" aria-label="Pending changes">
+          <svg class="i"><use href="#i-send"/></svg><span class="notif-dot hidden" id="pending-badge">0</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="content" id="content" tabindex="-1">
+      <div id="pending-banner" class="hidden" role="status" style="margin:0 0 16px;padding:12px 16px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px">
+        <strong>Restart required.</strong> <span id="pending-banner-text"></span>
+        <div class="card-note" style="margin-top:4px">These changes only take effect after you <strong>Stop</strong> and then <strong>Start</strong> the server (use the Dashboard buttons — not Restart).</div>
+      </div>
+
+      <!-- ================= DASHBOARD ================= -->
+      <section id="tab-dashboard" class="tab-panel active" data-title="Dashboard">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-sub">World <strong id="head-world">—</strong> <span class="dot-sep"></span> <span id="status-text">—</span> <span id="status-since" class="muted"></span></p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-ghost btn-icon" onclick="refreshAll()" data-tip="Refresh status, info and resources"><svg class="i"><use href="#i-refresh"/></svg></button>
+            <button class="btn btn-danger-soft" onclick="serverAction('stop')"><svg class="i"><use href="#i-stop"/></svg>Stop</button>
+            <button class="btn btn-primary" onclick="serverAction('start')"><svg class="i"><use href="#i-play"/></svg>Start</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid kpi-grid-7">
+          <div class="kpi" id="kpi-status">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-server"/></svg>Server health</span></div>
+            <div class="kpi-value" id="kpi-health"><span class="skeleton w-60"></span></div>
+            <div class="kpi-foot" id="kpi-health-foot"><span class="skeleton w-80 sm"></span></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-users"/></svg>Players online</span><span class="live-tag" data-tip="Streamed live from server log activity — best effort">LIVE</span></div>
+            <div class="kpi-value" id="kpi-players"><span class="skeleton w-30"></span></div>
+            <div class="kpi-foot" id="kpi-players-foot"><span class="skeleton w-80 sm"></span></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label" data-tip="When Valheim last wrote the world to disk. The server only saves on its autosave timer and on a clean stop — if this gets old while the server runs, progress isn't being saved."><svg class="i"><use href="#i-archive"/></svg>World saved</span></div>
+            <div class="kpi-value" id="kpi-save"><span class="skeleton w-60"></span></div>
+            <div class="kpi-foot" id="kpi-save-foot"><span class="skeleton w-80 sm"></span></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-cpu"/></svg>CPU</span><span class="kpi-hint" data-tip="1-minute load average ÷ cores — the whole VPS, not just Valheim">load</span></div>
+            <div class="kpi-value"><span id="stat-cpu"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="stat-cpu-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="chart-cpu" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-cpu"/></svg>Valheim CPU</span><span class="kpi-hint" data-tip="The game process only, % of one core (like top) — can exceed 100% if it's using more than one core's worth across threads">process</span></div>
+            <div class="kpi-value"><span id="stat-valheim-cpu"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="stat-valheim-cpu-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="chart-valheim-cpu" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-memory"/></svg>Memory</span></div>
+            <div class="kpi-value"><span id="stat-mem"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="stat-mem-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="chart-mem" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-disk"/></svg>Disk</span></div>
+            <div class="kpi-value"><span id="stat-disk"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="stat-disk-sub" class="muted"></span></div>
+            <div class="meter" aria-hidden="true"><div class="meter-fill" id="stat-disk-bar"></div></div>
+          </div>
+        </div>
+
+        <div class="card" id="host-details-card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">Host details</h2><p class="card-sub">Updated with the resource poll. CPU steal and I/O wait are shares of total CPU time since the previous sample.</p></div></div>
+          <div class="kpi-grid kpi-compact" style="padding:0 16px 16px">
+            <div class="kpi"><div class="kpi-head"><span class="kpi-label">CPU steal</span></div><div class="kpi-value" id="stat-steal">—</div><div class="kpi-foot"><span id="stat-steal-sub" class="muted">Time taken by other VPS tenants</span></div></div>
+            <div class="kpi"><div class="kpi-head"><span class="kpi-label">I/O wait</span></div><div class="kpi-value" id="stat-iowait">—</div><div class="kpi-foot"><span class="muted">Waiting on disk</span></div></div>
+            <div class="kpi"><div class="kpi-head"><span class="kpi-label">Valheim memory</span></div><div class="kpi-value" id="stat-vmem">—</div><div class="kpi-foot"><span class="muted">Resident size of the game process</span></div></div>
+            <div class="kpi"><div class="kpi-head"><span class="kpi-label">Swap used</span></div><div class="kpi-value" id="stat-swap">—</div><div class="kpi-foot"><span id="stat-swap-sub" class="muted"></span></div></div>
+            <div class="kpi"><div class="kpi-head"><span class="kpi-label">Backups folder</span></div><div class="kpi-value" id="stat-bkdir">—</div><div class="kpi-foot"><span class="muted">Total size on the VPS</span></div></div>
+          </div>
+        </div>
+        <div class="grid-dash">
+          <div class="card span-2">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">Resource usage</h2>
+                <p class="card-sub">Sampled every 10 s · last 15 minutes</p>
+              </div>
+              <div class="legend">
+                <span class="legend-item"><span class="swatch s-cpu"></span>CPU (VPS)</span>
+                <span class="legend-item"><span class="swatch s-valheim"></span>CPU (Valheim)</span>
+                <span class="legend-item"><span class="swatch s-mem"></span>Memory</span>
+              </div>
+            </div>
+            <div class="chart-wrap" id="usage-chart-wrap">
+              <svg id="usage-chart" class="usage-chart" role="img" aria-label="CPU and memory usage over time"></svg>
+              <div class="chart-tip hidden" id="usage-chart-tip"></div>
+              <div class="chart-empty" id="usage-chart-empty"><div class="spinner"></div>Collecting samples…</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2 class="card-title">Server info</h2></div>
+            <dl class="info-list">
+              <div><dt>World</dt><dd id="info-world"><span class="skeleton w-50 sm"></span></dd></div>
+              <div><dt>Connect address</dt><dd class="dd-copy"><code id="info-connect" class="mono">—</code><button class="icon-btn sm" onclick="copyConnect()" data-tip="Copy address" aria-label="Copy connect address"><svg class="i"><use href="#i-copy"/></svg></button></dd></div>
+              <div><dt>Mods installed</dt><dd><a href="#mods" class="link-quiet" id="info-modcount"><span class="skeleton w-20 sm"></span></a></dd></div>
+              <div><dt>Service state</dt><dd id="info-state">—</dd></div>
+              <div><dt>Uptime</dt><dd id="info-uptime">—</dd></div>
+              <div><dt>Game port</dt><dd id="info-port">—</dd></div>
+            </dl>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Players online <span class="count-pill" id="players-count">0</span></h2>
+              <button class="icon-btn sm" onclick="loadPlayers()" data-tip="Refresh (the list also updates live)" aria-label="Refresh players"><svg class="i"><use href="#i-refresh"/></svg></button>
+            </div>
+            <ul id="players-list" class="player-list"></ul>
+            <p class="card-note">Detected from log activity — best effort.</p>
+          </div>
+
+          <div class="card span-2">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">Recent activity</h2>
+                <p class="card-sub">Actions, state changes and player joins from this browser</p>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="clearTimeline()" data-tip="Clear activity history">Clear</button>
+            </div>
+            <ol class="timeline" id="timeline"></ol>
+          </div>
+
+          <div class="card span-3 card-flush">
+            <div class="console-wrap" data-console>
+              <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Last control command</span><span class="console-state"></span><div class="console-tools"></div></div>
+              <pre id="dashboard-output" class="console short" data-empty="Start and stop output appears here."></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= MODS ================= -->
+      <section id="tab-mods" class="tab-panel" data-title="Mods">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Mods</h1>
+            <p class="page-sub">BepInEx plugins, ValheimEnforcer categories and player distribution</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="refreshModsPage()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+            <button class="btn btn-primary" onclick="showModsTab('browse'); document.getElementById('mod-search-input').focus()"><svg class="i"><use href="#i-plus"/></svg>Add mod</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid kpi-compact">
+          <button class="kpi kpi-btn" onclick="setModFilter('all')"><div class="kpi-label"><svg class="i"><use href="#i-package"/></svg>Installed</div><div class="kpi-value" id="mk-installed"><span class="skeleton w-30"></span></div></button>
+          <button class="kpi kpi-btn" onclick="setUpdatesOnly(true)"><div class="kpi-label"><svg class="i"><use href="#i-arrow-up-circle"/></svg>Updates available</div><div class="kpi-value" id="mk-updates"><span class="skeleton w-30"></span></div></button>
+          <button class="kpi kpi-btn" onclick="setModFilter('unknown')" data-tip="Installed but not in Mods.yaml under a matching name"><div class="kpi-label"><svg class="i"><use href="#i-alert"/></svg>Unlisted</div><div class="kpi-value" id="mk-unlisted"><span class="skeleton w-30"></span></div></button>
+          <button class="kpi kpi-btn" onclick="showModsTab('disabled')"><div class="kpi-label"><svg class="i"><use href="#i-pause"/></svg>Disabled</div><div class="kpi-value" id="mk-disabled"><span class="skeleton w-30"></span></div></button>
+        </div>
+
+        <div class="subtabs" role="tablist" aria-label="Mods sections">
+          <button class="subtab active" role="tab" data-subtab="installed">Installed <span class="subtab-count" id="installed-mods-count"></span></button>
+          <button class="subtab" role="tab" data-subtab="disabled">Disabled <span class="subtab-count" id="disabled-mods-count"></span></button>
+          <button class="subtab" role="tab" data-subtab="browse">Browse &amp; install</button>
+          <button class="subtab" role="tab" data-subtab="requirements">Requirements</button>
+          <button class="subtab" role="tab" data-subtab="codes">Profile codes</button>
+        </div>
+
+        <div class="mods-layout">
+          <div class="mods-main">
+
+            <!-- Installed -->
+            <div class="subpanel active" id="sub-installed">
+              <div class="card card-flush">
+                <div class="toolbar">
+                  <div class="input-icon grow">
+                    <svg class="i"><use href="#i-search"/></svg>
+                    <input id="mod-filter-input" type="search" placeholder="Filter installed mods…  ( / )" oninput="renderInstalledMods()" aria-label="Filter installed mods">
+                  </div>
+                  <div class="chips" id="mod-category-chips" role="group" aria-label="Filter by category"></div>
+                  <label class="switch" data-tip="Show only mods with an update available"><input type="checkbox" id="mod-updates-only" onchange="renderInstalledMods()"><span class="switch-track"></span>Updates only</label>
+                  <label class="switch" data-tip="Group rows by ValheimEnforcer category"><input type="checkbox" id="mod-group-toggle" checked onchange="renderInstalledMods()"><span class="switch-track"></span>Group</label>
+                </div>
+
+                <div class="table-wrap">
+                  <table class="table" id="mods-table">
+                    <thead>
+                      <tr>
+                        <th class="col-check"><input type="checkbox" id="bulk-select-all" onchange="toggleSelectAll(this.checked)" aria-label="Select all visible"></th>
+                        <th><button class="th-sort" data-sort="name">Mod <svg class="i"><use href="#i-chevrons-up-down"/></svg></button></th>
+                        <th class="col-cat"><button class="th-sort" data-sort="status">Category <svg class="i"><use href="#i-chevrons-up-down"/></svg></button></th>
+                        <th class="col-version"><button class="th-sort" data-sort="version">Version <svg class="i"><use href="#i-chevrons-up-down"/></svg></button></th>
+                        <th><button class="th-sort" data-sort="update">Update <svg class="i"><use href="#i-chevrons-up-down"/></svg></button></th>
+                        <th class="col-actions"><span class="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="installed-mods-groups"></tbody>
+                  </table>
+                </div>
+
+                <div id="bulk-actions-bar" class="bulk-bar" aria-live="polite">
+                  <span id="bulk-selected-count" class="bulk-count">No mods selected</span>
+                  <span class="bulk-sep"></span>
+                  <select id="bulk-category-select" class="select sm" disabled aria-label="Category for selected">
+                    <option value="required">Required</option>
+                    <option value="optional">Optional</option>
+                    <option value="admin">Admin-only</option>
+                    <option value="server">Server-only</option>
+                  </select>
+                  <button class="btn btn-secondary btn-sm" onclick="bulkSetCategory()" disabled>Set category</button>
+                  <button class="btn btn-secondary btn-sm" onclick="bulkUpdateSelected()" disabled data-tip="Update every selected mod that has an update, using its best match"><svg class="i"><use href="#i-arrow-up-circle"/></svg>Update</button>
+                  <button class="btn btn-danger-soft btn-sm" onclick="bulkRemoveSelected()" disabled><svg class="i"><use href="#i-trash"/></svg>Remove</button>
+                  <button class="icon-btn sm" onclick="toggleSelectAll(false)" data-tip="Clear selection" aria-label="Clear selection"><svg class="i"><use href="#i-x"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Disabled -->
+            <div class="subpanel" id="sub-disabled">
+              <div class="card card-flush">
+                <div class="card-head padded">
+                  <div>
+                    <h2 class="card-title">Disabled mods</h2>
+                    <p class="card-sub">Moved out of BepInEx/plugins — not running, kept on disk.</p>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" onclick="loadDisabledMods()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+                </div>
+                <ul id="disabled-mods-list" class="row-list"></ul>
+              </div>
+            </div>
+
+            <!-- Browse -->
+            <div class="subpanel" id="sub-browse">
+              <div class="card card-flush">
+                <form class="toolbar" onsubmit="event.preventDefault(); searchMods();">
+                  <div class="input-icon grow">
+                    <svg class="i"><use href="#i-search"/></svg>
+                    <input id="mod-search-input" type="search" placeholder="Search Thunderstore and Hexium…" aria-label="Search mods">
+                  </div>
+                  <select id="mod-search-source" class="select" aria-label="Source">
+                    <option value="both" selected>All sources</option>
+                    <option value="thunderstore">Thunderstore</option>
+                    <option value="hexium">Hexium</option>
+                  </select>
+                  <button class="btn btn-primary" type="submit">Search</button>
+                </form>
+                <p class="toolbar-note"><svg class="i"><use href="#i-info"/></svg>Deprecated packages are never shown. Install always asks you to confirm source, author and exact version first.</p>
+                <ul id="mod-search-results" class="row-list"></ul>
+              </div>
+            </div>
+
+            <!-- Requirements -->
+            <div class="subpanel" id="sub-requirements">
+              <div class="card card-flush">
+                <div class="card-head padded">
+                  <div>
+                    <h2 class="card-title">Current requirements</h2>
+                    <p class="card-sub">What players need — read-only, from Mods.yaml. Each mod links to its source page plus a one-click <code>gale://</code> install for <a href="https://hexium.gg/mod-manager" target="_blank" rel="noopener">Gale</a>.</p>
+                  </div>
+                  <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" onclick="loadRequirements()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+                    <button class="btn btn-secondary btn-sm" onclick="copyRequirements()"><svg class="i"><use href="#i-copy"/></svg>Copy as text</button>
+                  </div>
+                </div>
+                <div id="requirements-output"></div>
+              </div>
+            </div>
+
+            <!-- Codes -->
+            <div class="subpanel" id="sub-codes">
+              <div class="card">
+                <div class="card-head">
+                  <div>
+                    <h2 class="card-title">Generate profile codes</h2>
+                    <p class="card-sub">Builds Thunderstore-format profile codes directly from Mods.yaml. Import in <a href="https://hexium.gg/mod-manager" target="_blank" rel="noopener">Gale</a> via File › Import profile › From code.</p>
+                  </div>
+                </div>
+                <div class="explain-grid">
+                  <div class="explain"><div class="explain-title">Player code</div><div class="explain-body">requiredMods</div></div>
+                  <div class="explain"><div class="explain-title">Admin code</div><div class="explain-body">requiredMods + adminOnlyMods</div></div>
+                  <div class="explain"><div class="explain-title">Always included</div><div class="explain-body">BepInExPack & JsonDotNET — verified by hash where possible (can take a while)</div></div>
+                </div>
+                <div class="form-row">
+                  <label class="field">
+                    <span class="field-label">Generate</span>
+                    <select id="generate-codes-mode" class="select">
+                      <option value="both">Both codes</option>
+                      <option value="player">Player only</option>
+                      <option value="admin">Admin only</option>
+                    </select>
+                  </label>
+                  <label class="switch" data-tip="Preview only — nothing is uploaded"><input type="checkbox" id="generate-codes-dry-run-check"><span class="switch-track"></span>Dry run</label>
+                  <span class="grow"></span>
+                  <button class="btn btn-primary" id="generate-codes-btn" onclick="generateCodes()"><svg class="i"><use href="#i-key"/></svg>Generate</button>
+                </div>
+                <div id="generated-codes" class="code-results"></div>
+              </div>
+              <div class="card card-flush">
+                <div class="console-wrap" data-console>
+                  <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>generate-codes output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                  <pre id="generate-codes-output" class="console" data-empty="Run Generate to stream output here."></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right rail: action log -->
+          <aside class="mods-rail" id="action-log">
+            <div class="card card-flush rail-card">
+              <div class="card-head padded">
+                <div>
+                  <h2 class="card-title">Action log</h2>
+                  <p class="card-sub" id="pending-changes-count">No pending changes</p>
+                </div>
+                <button class="btn btn-primary btn-sm" id="notify-discord-btn" onclick="sendDiscordSummary()" disabled data-tip="Send one consolidated summary of all pending changes"><svg class="i"><use href="#i-send"/></svg>Notify Discord</button>
+              </div>
+              <ul class="pending-list" id="pending-list"></ul>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="mods-output" class="console rail" data-empty="Install, update, remove and categorize output streams here."></pre>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= BACKUPS ================= -->
+      <section id="tab-backups" class="tab-panel" data-title="Backups">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Backups</h1>
+            <p class="page-sub">World snapshots stored on the server</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="listBackups()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+            <button class="btn btn-primary" onclick="runBackup()" id="run-backup-btn"><svg class="i"><use href="#i-archive"/></svg>Run backup now</button>
+          </div>
+        </div>
+        <div class="kpi-grid kpi-compact">
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-layers"/></svg>Total backups</div><div class="kpi-value" id="bk-total">—</div></div>
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-clock"/></svg>Most recent</div><div class="kpi-value kpi-value-sm" id="bk-latest">—</div></div>
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-shield"/></svg>Restore safety</div><div class="kpi-value kpi-value-sm">Safety copy + typed confirm</div></div>
+        </div>
+        <div class="card" id="backup-schedule-card" style="margin-bottom:16px">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Scheduled backups</h2>
+              <p class="card-sub" id="bk-sched-sub">Loading…</p>
+            </div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:0 16px 4px">
+            <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bk-sched-enabled"> Run automatically</label>
+            <label style="display:flex;gap:8px;align-items:center">Every
+              <select id="bk-sched-interval" aria-label="Backup interval">
+                <option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option><option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option><option value="12">12 hours</option>
+                <option value="24">24 hours</option><option value="48">2 days</option><option value="168">7 days</option>
+              </select>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bk-sched-empty" checked> Only when nobody is online</label>
+            <button class="btn btn-primary btn-sm" id="bk-sched-save" onclick="saveBackupSchedule()">Save schedule</button>
+          </div>
+          <p class="card-note" id="bk-sched-last" style="padding:8px 16px 0"></p>
+          <p class="card-note" style="padding:4px 16px 12px">Saving installs a real cron job on the VPS (/etc/cron.d/valheim-gui-backup), so backups run on their own even when this dashboard and your PC are off. Each run stops the server cleanly (which saves the world), archives it, uploads and prunes old copies, then starts the server again — about a minute of downtime. It is skipped while the server is stopped. With “only when nobody is online” a run that finds players connected is postponed and retried every 15 minutes (up to 12 hours) until the server is empty. If a backup fails after stopping the server, the server is started again automatically. “Run backup now” shares a lock with the scheduled job, so the two can never overlap. Turn the schedule off here to delete the cron job.</p>
+        </div>
+        <div class="grid-2">
+          <div class="card card-flush">
+            <div class="toolbar">
+              <div class="input-icon grow"><svg class="i"><use href="#i-search"/></svg><input type="search" id="backup-filter" placeholder="Filter backups…" oninput="renderBackups()" aria-label="Filter backups"></div>
+              <button class="btn btn-ghost btn-sm" id="backup-sort-btn" onclick="toggleBackupSort()" data-tip="Toggle sort order"><svg class="i"><use href="#i-arrow-down"/></svg>Newest first</button>
+            </div>
+            <ul id="backup-files-list" class="row-list"></ul>
+          </div>
+          <div class="card card-flush">
+            <div class="console-wrap" data-console>
+              <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Backup / restore output</span><span class="console-state"></span><div class="console-tools"></div></div>
+              <pre id="backup-output" class="console tall" data-empty="Backup and restore output streams here."></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= UPDATES ================= -->
+      <section id="tab-updates" class="tab-panel" data-title="Updates">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Server updates</h1>
+            <p class="page-sub">Valheim dedicated server builds via steamcmd</p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="action-card">
+            <div class="action-icon"><svg class="i"><use href="#i-search"/></svg></div>
+            <div class="action-body">
+              <h3>Check for update</h3>
+              <p>Compares the installed build against Steam. Read-only — safe to run any time.</p>
+            </div>
+            <button class="btn btn-secondary" onclick="checkUpdate()">Check now</button>
+          </div>
+          <div class="action-card warn">
+            <div class="action-icon"><svg class="i"><use href="#i-download-cloud"/></svg></div>
+            <div class="action-body">
+              <h3>Apply update</h3>
+              <p>Installs the latest server build. Confirm your mods are compatible with the new version first.</p>
+            </div>
+            <button class="btn btn-warn" onclick="applyUpdate()">Apply update</button>
+          </div>
+        </div>
+        <div class="card" id="update-schedule-card" style="margin-bottom:16px">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Automatic server-update check</h2>
+              <p class="card-sub" id="upd-sched-sub">Loading…</p>
+            </div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:0 16px 4px">
+            <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="upd-sched-enabled"> Check automatically</label>
+            <label style="display:flex;gap:8px;align-items:center">Every
+              <select id="upd-sched-interval" aria-label="Update check interval">
+                <option value="6">6 hours</option><option value="12">12 hours</option><option value="24">24 hours</option>
+                <option value="48">2 days</option><option value="168">7 days</option>
+              </select>
+            </label>
+            <button class="btn btn-primary btn-sm" id="upd-sched-save" onclick="saveUpdateSchedule()">Save</button>
+          </div>
+          <p class="card-note" id="upd-sched-last" style="padding:8px 16px 0"></p>
+          <p class="card-note" style="padding:4px 16px 12px">Installs a cron job on the VPS (/etc/cron.d/valheim-gui-update-check) that runs your update-check script and posts to Discord when a new server build appears. It never installs, stops or restarts anything. Mod updates are not covered (they need the dashboard); check those on the Mods page.</p>
+        </div>
+        <div class="card card-flush">
+          <div class="console-wrap" data-console>
+            <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Update output</span><span class="console-state"></span><div class="console-tools"></div></div>
+            <pre id="update-output" class="console tall" data-empty="Run a check to see whether a new server build is available."></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SETTINGS ================= -->
+      <section id="tab-settings" class="tab-panel" data-title="Settings">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Server settings</h1>
+            <p class="page-sub" id="set-sub">Launch settings and player lists</p>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">Launch settings</h2><p class="card-sub">Saved to the LGSM config (a .bak copy is made first). Takes effect after Stop → Start.</p></div></div>
+          <p class="card-note" id="set-warn" style="padding:0 16px"></p>
+          <form id="set-form" onsubmit="saveSettings(event)" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:8px 16px 16px"></form>
+          <div style="padding:0 16px 16px;display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" id="set-save" onclick="saveSettings(event)">Save settings</button>
+            <span class="card-note" id="set-note"></span>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">World modifiers</h2><p class="card-sub" id="wm-sub">Difficulty and rules passed to the server at launch. Applies after Stop → Start.</p></div></div>
+          <p class="card-note" id="wm-warn" style="padding:0 16px"></p>
+          <div id="wm-wrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;padding:8px 16px 8px"></div>
+          <div id="wm-keys" style="display:flex;flex-wrap:wrap;gap:16px;padding:4px 16px 8px"></div>
+          <div style="padding:0 16px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="wm-save" onclick="saveModifiers()">Save modifiers</button>
+            <span class="card-note" id="wm-preview"></span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2 class="card-title">Admins, bans and whitelist</h2><p class="card-sub">SteamID64 (17 digits). Changes apply within about a minute — no restart.</p></div></div>
+          <div id="lists-wrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:8px 16px 16px"></div>
+          <p class="card-note" style="padding:0 16px 14px">Whitelist (permitted list): when it has any entries, only those IDs can join. Leave it empty to allow everyone with the password.</p>
+        </div>
+      </section>
+
+      <!-- ================= MOD CONFIGS ================= -->
+      <section id="tab-configs" class="tab-panel" data-title="Mod configs">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Mod configs</h1>
+            <p class="page-sub">BepInEx plugin settings. A backup copy is made before each save; changes apply after Stop → Start.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="toolbar" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px">
+            <select id="cfg-file" onchange="loadConfigFile()" aria-label="Config file" style="min-width:220px;max-width:100%"></select>
+            <div class="input-icon grow"><svg class="i"><use href="#i-search"/></svg><input type="search" id="cfg-filter" placeholder="Filter settings…" oninput="renderConfigEntries()" aria-label="Filter settings"></div>
+            <button class="btn btn-primary btn-sm" id="cfg-save" onclick="saveConfigFile()" disabled>Save changes</button>
+          </div>
+          <p class="card-note" id="cfg-note" style="padding:0 16px 8px"></p>
+          <div id="cfg-entries" style="padding:0 16px 16px"></div>
+        </div>
+      </section>
+
+      <!-- ================= LOGS ================= -->
+      <section id="tab-logs" class="tab-panel page-fill" data-title="Logs">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Logs</h1>
+            <p class="page-sub">LGSM console log and BepInEx LogOutput.log</p>
+          </div>
+        </div>
+        <div class="card card-flush log-card">
+          <div class="toolbar">
+            <select id="log-source" class="select" aria-label="Log source">
+                <option value="journal">LGSM console log</option>
+                <option value="tail">BepInEx LogOutput.log</option>
+              </select>
+            <select id="log-lines" class="select" aria-label="Snapshot size">
+              <option value="100">100 lines</option>
+              <option value="200" selected>200 lines</option>
+              <option value="500">500 lines</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadLogs()">Load snapshot</button>
+            <button class="btn btn-primary" id="live-toggle" onclick="toggleLive()"><svg class="i"><use href="#i-play"/></svg>Go live</button>
+            <span class="toolbar-divider"></span>
+            <div class="input-icon grow"><svg class="i"><use href="#i-filter"/></svg><input type="search" id="log-filter" placeholder="Filter lines…" oninput="applyLogFilter()" aria-label="Filter log lines"></div>
+            <div class="chips" id="log-level-chips" role="group" aria-label="Level">
+              <button class="chip active" data-level="all">All</button>
+              <button class="chip" data-level="warn">Warnings</button>
+              <button class="chip" data-level="error">Errors</button>
+            </div>
+            <button class="icon-btn" id="log-wrap-btn" onclick="toggleLogWrap()" data-tip="Toggle line wrap" aria-pressed="true"><svg class="i"><use href="#i-wrap"/></svg></button>
+            <button class="icon-btn active" id="log-follow-btn" onclick="toggleLogFollow()" data-tip="Auto-scroll to newest" aria-pressed="true"><svg class="i"><use href="#i-scroll-down"/></svg></button>
+            <button class="icon-btn" onclick="copyLogs()" data-tip="Copy visible lines"><svg class="i"><use href="#i-copy"/></svg></button>
+            <button class="icon-btn" onclick="downloadLogs()" data-tip="Download as .log"><svg class="i"><use href="#i-download"/></svg></button>
+            <button class="icon-btn" onclick="clearLogs()" data-tip="Clear view"><svg class="i"><use href="#i-trash"/></svg></button>
+          </div>
+          <div class="log-status" id="log-status"><span class="log-status-dot"></span><span id="log-status-text">Idle</span><span class="grow"></span><span id="log-line-count" class="muted">0 lines</span></div>
+          <div id="logs-output" class="logview wrap" role="log" aria-live="off" tabindex="0"></div>
+        </div>
+      </section>
+
+      <!-- ================= WORLDS ================= -->
+      <section id="tab-worlds" class="tab-panel" data-title="Worlds">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Worlds</h1>
+            <p class="page-sub">Run several worlds at the same time. Each world is its own server (own game account, port, mods, backups). Pick one to manage it from the other tabs.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-ghost btn-icon" onclick="loadWorlds()" data-tip="Refresh"><svg class="i"><use href="#i-refresh"/></svg></button>
+            <button class="btn btn-primary" onclick="openAddWorld()"><svg class="i"><use href="#i-server"/></svg>Add world</button>
+          </div>
+        </div>
+        <div id="worlds-grid" class="world-grid"></div>
+        <div class="callout info" style="margin-top:16px">
+          <svg class="i"><use href="#i-info"/></svg>
+          <div>Every world needs its own game port (a Valheim server uses its port and the next two, so worlds are 10 apart: 2456, 2466, 2476, ...). Open the UDP range for each world in your VPS or cloud firewall. Each extra world installs its own copy of the server (about 2 GB of disk) and its own mods.</div>
+        </div>
+      </section>
+
+      <!-- ================= SETUP ================= -->
+      <section id="tab-setup" class="tab-panel" data-title="Setup">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">First-time setup</h1>
+            <p class="page-sub">Take a fresh Ubuntu/Debian VPS to a working modded server, top to bottom. Each step checks what's done and skips ahead, so you can re-run any of them.</p>
+            <p class="page-sub hidden" id="setup-world-chip" style="margin-top:6px"></p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="loadSetupStatus()"><svg class="i"><use href="#i-refresh"/></svg>Refresh status</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="setup-progress">
+            <div class="setup-progress-head"><span class="card-title">Environment checks</span><span id="setup-progress-text" class="muted">—</span></div>
+            <div class="meter lg"><div class="meter-fill good" id="setup-progress-bar"></div></div>
+          </div>
+          <div id="setup-status-grid" class="check-grid"></div>
+          <div id="setup-banner"></div>
+        </div>
+
+        <div class="callout warn">
+          <svg class="i"><use href="#i-alert"/></svg>
+          <div><strong>Before you start.</strong> The GUI must be able to run commands as root on the VPS (SSH as <code>root</code>, or the GUI running on the VPS as root). Work through the steps in order and keep this page open while a step is running. Step 5 edits LinuxGSM's <code>common.cfg</code> (backed up first). Nothing starts the game until you press Start in step 8.</div>
+        </div>
+
+        <ol class="steps">
+          <li class="step" id="step-1">
+            <div class="step-rail"><span class="step-num">1</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Install LinuxGSM</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" onclick="runSetupPrepare()">Install LinuxGSM</button>
+              </div>
+              <p class="step-desc">Creates the game account (<code>lgsmUser</code>, default <code>vhserver</code>), installs the packages LinuxGSM needs (32-bit libraries, tmux, cron, curl, unzip, python3, sudo) and downloads LinuxGSM for Valheim. Ubuntu and Debian only. Safe to run again.</p>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-prepare-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+          <li class="step" id="step-2">
+            <div class="step-rail"><span class="step-num">2</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Install the Valheim server</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" onclick="runSetupInstallServer()">Install / validate</button>
+              </div>
+              <p class="step-desc">LinuxGSM downloads the Valheim dedicated server from Steam (about 1–2 GB, several minutes — keep this page open) and creates its config files. Re-running just validates the files.</p>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-server-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+          <li class="step" id="step-3">
+            <div class="step-rail"><span class="step-num">3</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Name the server and world, set a password</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" id="setup-identity-btn" onclick="runSetupIdentity()">Save</button>
+              </div>
+              <p class="step-desc">These are LinuxGSM settings. Valheim refuses to start without a password. The world is created the first time the server starts, and the GUI then shows that world name everywhere. Changing the world name later starts a <strong>new</strong> world.</p>
+              <div class="form-row" style="margin-top:12px">
+                <label class="field grow"><span class="field-label">Server name <span class="muted">(shown in the server list)</span></span><input type="text" id="setup-servername" maxlength="60" placeholder="My Valheim Server" autocomplete="off"></label>
+                <label class="field grow"><span class="field-label">World name <span class="muted">(letters, digits . _ - only)</span></span><input type="text" id="setup-worldname" maxlength="40" placeholder="MyWorld" autocomplete="off"></label>
+                <label class="field grow"><span class="field-label">Server password <span class="muted">(5+ characters, must not contain the world name)</span></span><input type="password" id="setup-password" maxlength="64" placeholder="" autocomplete="new-password"></label>
+                <label class="field"><span class="field-label">Game port <span class="muted">(UDP, +2 more used)</span></span><input type="text" id="setup-port" inputmode="numeric" maxlength="5" placeholder="2456" autocomplete="off" style="max-width:110px"></label>
+              </div>
+              <div id="setup-identity-msg"></div>
+            </div>
+          </li>
+          <li class="step" id="step-4">
+            <div class="step-rail"><span class="step-num">4</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Install BepInEx</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" onclick="runSetupInstallBepinex()">Install BepInEx</button>
+              </div>
+              <p class="step-desc">Downloads the current denikson-BepInExPack_Valheim and merges it into the server folder (<code>BepInEx/</code>, launcher scripts, doorstop config). Doesn't touch common.cfg.</p>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-bepinex-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+          <li class="step" id="step-5">
+            <div class="step-rail"><span class="step-num">5</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Wire common.cfg to BepInEx</h3><span class="step-state" data-step-state></span></div>
+                <div class="btn-group">
+                  <button class="btn btn-secondary" onclick="runSetupSystemdPreview()"><svg class="i"><use href="#i-eye"/></svg>Preview change</button>
+                  <button class="btn btn-warn" id="setup-systemd-apply-btn" onclick="runSetupSystemdApply()" disabled data-tip="Preview first — this stays disabled until a change is shown">Apply change</button>
+                </div>
+              </div>
+              <p class="step-desc">Adds the four <code>DOORSTOP_*</code>/<code>LD_*</code> export lines LinuxGSM needs to launch through BepInEx instead of running Valheim bare — nothing existing in <code>common.cfg</code> is touched, and the file is backed up first. Doesn't start or restart anything.</p>
+              <div id="setup-systemd-diff"></div>
+            </div>
+          </li>
+          <li class="step" id="step-6">
+            <div class="step-rail"><span class="step-num">6</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Install ValheimEnforcer</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" onclick="runSetupInstallEnforcer()">Install ValheimEnforcer</button>
+              </div>
+              <p class="step-desc">Installs MidnightMods-ValheimEnforcer as a normal BepInEx plugin. Its <code>Mods.yaml</code> appears on the first start and every mod feature becomes usable.</p>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-enforcer-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+          <li class="step" id="step-7">
+            <div class="step-rail"><span class="step-num">7</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Install helper scripts</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" onclick="runSetupInstallHelpers()">Install scripts</button>
+              </div>
+              <p class="step-desc">Installs the scripts the other tabs call — backup, update check, update apply, and the two Mods helpers — plus their folders and the Python YAML library. A script that already exists and differs is kept as <code>.bak</code> first.</p>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-helpers-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+          <li class="step" id="step-8">
+            <div class="step-rail"><span class="step-num">8</span></div>
+            <div class="step-card card">
+              <div class="step-head">
+                <div><h3 class="step-title">Start the server and check it</h3><span class="step-state" data-step-state></span></div>
+                <button class="btn btn-primary" id="setup-start-btn" onclick="runSetupStart()"><svg class="i"><use href="#i-play"/></svg>Start server</button>
+              </div>
+              <p class="step-desc">Do this last, once steps 1–7 are done: the server starts once with everything in place, so no restart is needed. The first start creates the world and can take a few minutes — the checklist above fills in as it comes up (server running, game port open, world created, BepInEx and ValheimEnforcer loaded, <code>Mods.yaml</code> present). If you already started the server earlier, press Stop, wait until the Dashboard shows <em>inactive</em>, then Start.</p>
+              <div class="callout warn sm hidden" style="margin-top:10px" id="setup-restart-note"></div>
+              <div class="console-wrap" data-console>
+                <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+                <pre id="setup-start-output" class="console short" data-empty="Not run yet."></pre>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ================= PROJECT ZOMBOID: DASHBOARD ================= -->
+      <section id="tab-pz-dashboard" class="tab-panel" data-title="Dashboard">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-sub">Server <strong>servertest</strong> <span class="dot-sep"></span> <span id="pz-status-text">—</span> <span id="pz-status-since" class="muted"></span></p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-ghost btn-icon" onclick="pzRefreshAll()" data-tip="Refresh status and resources"><svg class="i"><use href="#i-refresh"/></svg></button>
+            <button class="btn btn-danger-soft" onclick="pzServerAction('stop')"><svg class="i"><use href="#i-stop"/></svg>Stop</button>
+            <button class="btn btn-secondary" onclick="pzServerAction('restart')"><svg class="i"><use href="#i-rotate"/></svg>Restart</button>
+            <button class="btn btn-primary" onclick="pzServerAction('start')"><svg class="i"><use href="#i-play"/></svg>Start</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi" id="pz-kpi-status">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-server"/></svg>Server health</span></div>
+            <div class="kpi-value" id="pz-kpi-health"><span class="skeleton w-60"></span></div>
+            <div class="kpi-foot" id="pz-kpi-health-foot"><span class="skeleton w-80 sm"></span></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-users"/></svg>Players online</span><span class="kpi-hint" data-tip="Via RCON's `players` command, polled every 10s — no live log to tail for this game">RCON</span></div>
+            <div class="kpi-value" id="pz-kpi-players"><span class="skeleton w-30"></span></div>
+            <div class="kpi-foot" id="pz-kpi-players-foot"><span class="skeleton w-80 sm"></span></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-cpu"/></svg>CPU</span><span class="kpi-hint" data-tip="1-minute load average ÷ cores — the whole VPS, not just Zomboid">load</span></div>
+            <div class="kpi-value"><span id="pz-stat-cpu"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="pz-stat-cpu-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="pz-chart-cpu" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-cpu"/></svg>Zomboid CPU</span><span class="kpi-hint" data-tip="The game process only, % of one core (like top) — can exceed 100% across threads">process</span></div>
+            <div class="kpi-value"><span id="pz-stat-proc-cpu"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="pz-stat-proc-cpu-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="pz-chart-proc-cpu" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-memory"/></svg>Memory</span></div>
+            <div class="kpi-value"><span id="pz-stat-mem"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="pz-stat-mem-sub" class="muted"></span></div>
+            <svg class="kpi-spark" id="pz-chart-mem" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head"><span class="kpi-label"><svg class="i"><use href="#i-disk"/></svg>Disk</span></div>
+            <div class="kpi-value"><span id="pz-stat-disk"><span class="skeleton w-40"></span></span></div>
+            <div class="kpi-foot"><span id="pz-stat-disk-sub" class="muted"></span></div>
+            <div class="meter" aria-hidden="true"><div class="meter-fill" id="pz-stat-disk-bar"></div></div>
+          </div>
+        </div>
+
+        <div class="grid-dash">
+          <div class="card span-2">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">Resource usage</h2>
+                <p class="card-sub">Sampled every 10 s · last 15 minutes</p>
+              </div>
+              <div class="legend">
+                <span class="legend-item"><span class="swatch s-cpu"></span>CPU (VPS)</span>
+                <span class="legend-item"><span class="swatch s-valheim"></span>CPU (Zomboid)</span>
+                <span class="legend-item"><span class="swatch s-mem"></span>Memory</span>
+              </div>
+            </div>
+            <div class="chart-wrap" id="pz-usage-chart-wrap">
+              <svg id="pz-usage-chart" class="usage-chart" role="img" aria-label="CPU and memory usage over time"></svg>
+              <div class="chart-tip hidden" id="pz-usage-chart-tip"></div>
+              <div class="chart-empty" id="pz-usage-chart-empty"><div class="spinner"></div>Collecting samples…</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2 class="card-title">Server info</h2></div>
+            <dl class="info-list">
+              <div><dt>Connect address</dt><dd class="dd-copy"><code id="pz-info-connect" class="mono">—</code><button class="icon-btn sm" onclick="pzCopyConnect()" data-tip="Copy address" aria-label="Copy connect address"><svg class="i"><use href="#i-copy"/></svg></button></dd></div>
+              <div><dt>Service state</dt><dd id="pz-info-state">—</dd></div>
+              <div><dt>Uptime</dt><dd id="pz-info-uptime">—</dd></div>
+              <div><dt>Game port</dt><dd id="pz-info-port">—</dd></div>
+            </dl>
+          </div>
+
+          <div class="card card-fill">
+            <div class="card-head">
+              <h2 class="card-title">Players online <span class="count-pill" id="pz-players-count">0</span></h2>
+              <button class="icon-btn sm" onclick="pzLoadPlayers()" data-tip="Refresh" aria-label="Refresh players"><svg class="i"><use href="#i-refresh"/></svg></button>
+            </div>
+            <ul id="pz-players-list" class="player-list"></ul>
+            <p class="card-note">Via RCON — best effort.</p>
+          </div>
+
+          <div class="card span-2">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">RCON</h2>
+                <p class="card-sub">Quick actions, or a free-form command</p>
+              </div>
+            </div>
+            <div class="btn-group" style="margin-bottom:12px">
+              <button class="btn btn-secondary btn-sm" onclick="pzRunRcon('save')"><svg class="i"><use href="#i-archive"/></svg>Save world</button>
+              <button class="btn btn-secondary btn-sm" onclick="pzRunRcon('players')"><svg class="i"><use href="#i-users"/></svg>List players</button>
+              <button class="btn btn-danger-soft btn-sm" onclick="pzBroadcast()"><svg class="i"><use href="#i-send"/></svg>Broadcast…</button>
+              <button class="btn btn-warn btn-sm" onclick="pzQuit()"><svg class="i"><use href="#i-stop"/></svg>Graceful quit</button>
+            </div>
+            <div class="input-icon" style="margin-bottom:10px">
+              <svg class="i"><use href="#i-terminal"/></svg>
+              <input type="text" id="pz-rcon-input" placeholder="Any RCON command, e.g. banuser &quot;PlayerName&quot;" onkeydown="if(event.key==='Enter')pzRunRconInput()">
+              <button class="btn btn-primary btn-sm" onclick="pzRunRconInput()">Run</button>
+            </div>
+            <div class="console-wrap" data-console>
+              <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>RCON output</span><span class="console-state"></span><div class="console-tools"></div></div>
+              <pre id="pz-rcon-output" class="console" data-empty="RCON responses appear here."></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= PROJECT ZOMBOID: BACKUPS ================= -->
+      <section id="tab-pz-backups" class="tab-panel" data-title="Backups">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Backups</h1>
+            <p class="page-sub">Full snapshot of ~/Zomboid (Saves + Server config)</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="pzListBackups()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+            <button class="btn btn-primary" onclick="pzRunBackup()" id="pz-run-backup-btn"><svg class="i"><use href="#i-archive"/></svg>Run backup now</button>
+          </div>
+        </div>
+        <div class="kpi-grid kpi-compact">
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-layers"/></svg>Total backups</div><div class="kpi-value" id="pz-bk-total">—</div></div>
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-clock"/></svg>Most recent</div><div class="kpi-value kpi-value-sm" id="pz-bk-latest">—</div></div>
+          <div class="kpi"><div class="kpi-label"><svg class="i"><use href="#i-shield"/></svg>Restore safety</div><div class="kpi-value kpi-value-sm">Typed confirmation</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card card-flush">
+            <div class="toolbar">
+              <div class="input-icon grow"><svg class="i"><use href="#i-search"/></svg><input type="search" id="pz-backup-filter" placeholder="Filter backups…" oninput="pzRenderBackups()" aria-label="Filter backups"></div>
+              <button class="btn btn-ghost btn-sm" id="pz-backup-sort-btn" onclick="pzToggleBackupSort()" data-tip="Toggle sort order"><svg class="i"><use href="#i-arrow-down"/></svg>Newest first</button>
+            </div>
+            <ul id="pz-backup-files-list" class="row-list"></ul>
+          </div>
+          <div class="card card-flush">
+            <div class="console-wrap" data-console>
+              <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Backup / restore output</span><span class="console-state"></span><div class="console-tools"></div></div>
+              <pre id="pz-backup-output" class="console tall" data-empty="Backup and restore output streams here."></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= PROJECT ZOMBOID: UPDATES ================= -->
+      <section id="tab-pz-updates" class="tab-panel" data-title="Updates">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Server updates</h1>
+            <p class="page-sub">Project Zomboid (Build 42, app 380870) via SteamCMD</p>
+          </div>
+        </div>
+        <div class="callout warn">
+          <svg class="i"><use href="#i-alert"/></svg>
+          <div>Zomboid has no separate "check" step — SteamCMD's own <code>app_update</code> reports whether anything changed, so checking and applying are the same action here. It stops the service, updates, then starts it back up.</div>
+        </div>
+        <div class="grid-2">
+          <div class="action-card warn">
+            <div class="action-icon"><svg class="i"><use href="#i-download-cloud"/></svg></div>
+            <div class="action-body">
+              <h3>Check &amp; apply update</h3>
+              <p>Stops the server, re-validates against Steam, starts it back up. Check your Workshop mods after a major build update first.</p>
+            </div>
+            <button class="btn btn-warn" onclick="pzApplyUpdate()">Check &amp; apply</button>
+          </div>
+        </div>
+        <div class="card card-flush">
+          <div class="console-wrap" data-console>
+            <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Update output</span><span class="console-state"></span><div class="console-tools"></div></div>
+            <pre id="pz-update-output" class="console tall" data-empty="Run an update to see SteamCMD's output."></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= PROJECT ZOMBOID: LOGS ================= -->
+      <section id="tab-pz-logs" class="tab-panel page-fill" data-title="Logs">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Logs</h1>
+            <p class="page-sub">systemd journal and Zomboid's server-console.txt</p>
+          </div>
+        </div>
+        <div class="card card-flush log-card">
+          <div class="toolbar">
+            <select id="pz-log-source" class="select" aria-label="Log source">
+              <option value="journal">systemd journal</option>
+              <option value="tail">server-console.txt</option>
+            </select>
+            <select id="pz-log-lines" class="select" aria-label="Snapshot size">
+              <option value="100">100 lines</option>
+              <option value="200" selected>200 lines</option>
+              <option value="500">500 lines</option>
+            </select>
+            <button class="btn btn-secondary" onclick="pzLoadLogs()">Load snapshot</button>
+            <button class="btn btn-primary" id="pz-live-toggle" onclick="pzToggleLive()"><svg class="i"><use href="#i-play"/></svg>Go live</button>
+            <span class="toolbar-divider"></span>
+            <div class="input-icon grow"><svg class="i"><use href="#i-filter"/></svg><input type="search" id="pz-log-filter" placeholder="Filter lines…" oninput="pzApplyLogFilter()" aria-label="Filter log lines"></div>
+            <div class="chips" id="pz-log-level-chips" role="group" aria-label="Level">
+              <button class="chip active" data-level="all">All</button>
+              <button class="chip" data-level="warn">Warnings</button>
+              <button class="chip" data-level="error">Errors</button>
+            </div>
+            <button class="icon-btn" id="pz-log-wrap-btn" onclick="pzToggleLogWrap()" data-tip="Toggle line wrap" aria-pressed="true"><svg class="i"><use href="#i-wrap"/></svg></button>
+            <button class="icon-btn active" id="pz-log-follow-btn" onclick="pzToggleLogFollow()" data-tip="Auto-scroll to newest" aria-pressed="true"><svg class="i"><use href="#i-scroll-down"/></svg></button>
+            <button class="icon-btn" onclick="pzCopyLogs()" data-tip="Copy visible lines"><svg class="i"><use href="#i-copy"/></svg></button>
+            <button class="icon-btn" onclick="pzDownloadLogs()" data-tip="Download as .log"><svg class="i"><use href="#i-download"/></svg></button>
+            <button class="icon-btn" onclick="pzClearLogs()" data-tip="Clear view"><svg class="i"><use href="#i-trash"/></svg></button>
+          </div>
+          <div class="log-status" id="pz-log-status"><span class="log-status-dot"></span><span id="pz-log-status-text">Idle</span><span class="grow"></span><span id="pz-log-line-count" class="muted">0 lines</span></div>
+          <div id="pz-logs-output" class="logview wrap" role="log" aria-live="off" tabindex="0"></div>
+        </div>
+      </section>
+
+      <section id="tab-pz-mods" class="tab-panel" data-title="Mods">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Mods</h1>
+            <p class="page-sub">Steam Workshop items wired into WorkshopItems=/Mods= — the server fetches them itself on restart</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="pzLoadMods()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+          </div>
+        </div>
+
+        <div class="card card-flush">
+          <div class="card-head padded">
+            <div>
+              <h2 class="card-title">Add a mod</h2>
+              <p class="card-sub">Paste a Workshop URL or ID — the internal Mod ID(s) are detected automatically from the downloaded mod.info.</p>
+            </div>
+          </div>
+          <form class="toolbar" onsubmit="event.preventDefault(); pzDetectMod();">
+            <div class="input-icon grow">
+              <svg class="i"><use href="#i-link"/></svg>
+              <input id="pz-mod-input" type="text" placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=… or just the numeric ID" aria-label="Workshop URL or ID">
+            </div>
+            <button class="btn btn-primary" id="pz-mod-detect-btn" type="submit"><svg class="i"><use href="#i-search"/></svg>Detect</button>
+          </form>
+          <div id="pz-mod-detect-result" class="card-section hidden"></div>
+          <div class="card-section">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="pzToggleManualMod()" id="pz-mod-manual-toggle">Or enter Workshop ID and Mod ID by hand</button>
+            <form class="toolbar hidden" id="pz-mod-manual-form" onsubmit="event.preventDefault(); pzAddModManual();" style="padding:10px 0 0;border:0;">
+              <input id="pz-mod-manual-workshop" type="text" placeholder="Workshop ID" style="max-width:140px;" aria-label="Workshop ID">
+              <input id="pz-mod-manual-modids" type="text" class="grow" placeholder="Mod ID(s), comma-separated" aria-label="Mod ID(s), comma-separated">
+              <input id="pz-mod-manual-name" type="text" placeholder="Name (optional)" style="max-width:200px;" aria-label="Mod name">
+              <button class="btn btn-secondary btn-sm" type="submit">Add</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="card card-flush">
+          <div class="card-head padded">
+            <div>
+              <h2 class="card-title">Configured mods</h2>
+              <p class="card-sub">Load order runs top to bottom — matches left-to-right in WorkshopItems=/Mods=. Nothing here restarts the server; use the Dashboard's Restart once you're done.</p>
+            </div>
+          </div>
+          <ul id="pz-mods-list" class="row-list"></ul>
+          <div id="pz-mods-unmanaged" class="card-section hidden"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============ Install / Update prompt ============ -->
+<div id="mod-prompt-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mod-prompt-title">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <h3 id="mod-prompt-title" class="modal-title">Install mod</h3>
+        <p id="mod-prompt-subtitle" class="modal-sub"></p>
+      </div>
+      <button class="icon-btn sm" onclick="closeModPrompt()" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-row">
+        <label>Source</label>
+        <div id="mod-prompt-source-options" class="seg-radio"></div>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-row">
+          <label for="mod-prompt-author">Author</label>
+          <select id="mod-prompt-author" class="select"></select>
+        </div>
+        <div class="modal-row">
+          <label for="mod-prompt-version">Version</label>
+          <select id="mod-prompt-version" class="select"></select>
+        </div>
+      </div>
+      <div id="mod-prompt-category-row" class="modal-row">
+        <label for="mod-prompt-category">Category to apply after next restart</label>
+        <select id="mod-prompt-category" class="select">
+          <option value="required">Required</option>
+          <option value="optional">Optional</option>
+          <option value="admin">Admin-only</option>
+          <option value="server">Server-only</option>
+        </select>
+      </div>
+      <p id="mod-prompt-warning" class="callout warn sm hidden"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModPrompt()">Cancel</button>
+      <button class="btn btn-primary" id="mod-prompt-confirm-btn" onclick="confirmModPrompt()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Generic dialog (confirm / typed confirm / forms) ============ -->
+<div id="dialog-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="dialog-head-inner">
+        <div class="dialog-icon" id="dialog-icon"></div>
+        <div>
+          <h3 id="dialog-title" class="modal-title"></h3>
+        </div>
+      </div>
+      <button class="icon-btn sm" data-dialog-cancel aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body" id="dialog-body"></div>
+    <div class="modal-foot" id="dialog-foot"></div>
+  </div>
+</div>
+
+<!-- ============ Command palette ============ -->
+<div id="cmdk" class="cmdk-overlay hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="cmdk">
+    <div class="cmdk-input"><svg class="i"><use href="#i-search"/></svg><input id="cmdk-input" type="text" placeholder="Type a command or page…" autocomplete="off" aria-label="Command"><kbd>Esc</kbd></div>
+    <ul class="cmdk-list" id="cmdk-list" role="listbox"></ul>
+  </div>
+</div>
+
+<div id="menu" class="menu hidden" role="menu"></div>
+<div id="tooltip" class="tooltip" role="tooltip"></div>
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

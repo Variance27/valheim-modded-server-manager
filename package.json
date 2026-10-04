@@ -1,0 +1,38 @@
+{
+  "name": "valheim-modded-server-manager",
+  "version": "1.0.0",
+  "description": "Web dashboard that sets up and manages modded Valheim dedicated servers (LinuxGSM + BepInEx + ValheimEnforcer) over SSH",
+  "main": "server.js",
+  "license": "MIT",
+  "author": "JD Quinones (https://github.com/Variance27)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Variance27/valheim-modded-server-manager.git"
+  },
+  "homepage": "https://github.com/Variance27/valheim-modded-server-manager#readme",
+  "bugs": {
+    "url": "https://github.com/Variance27/valheim-modded-server-manager/issues"
+  },
+  "keywords": [
+    "valheim",
+    "dedicated-server",
+    "linuxgsm",
+    "bepinex",
+    "valheimenforcer",
+    "server-manager",
+    "dashboard"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "set-password": "node set-password.js",
+    "check": "node --check server.js && node --check auth.js && node --check set-password.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "js-yaml": "^5.4.2",
+    "ssh2": "^1.15.0"
+  }
+}
