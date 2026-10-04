@@ -51,6 +51,10 @@ Edits the LinuxGSM config (`common.cfg`, or the instance cfg if that is where a 
 
 The admin, banned and permitted lists live in `adminlist.txt`, `bannedlist.txt` and `permittedlist.txt` next to the world data. IDs must be 17-digit SteamID64s. Valheim re-reads them while running, so no restart is needed.
 
+## Discord notifications
+
+The second card on the Settings tab holds the two webhook URLs (changes and status), a test button for each, and a Remove button. Details: [Backups and scheduling](BACKUPS_AND_SCHEDULING.md#discord).
+
 ## Logs
 
 A snapshot of the LinuxGSM console log or `LogOutput.log`, plus a "Go Live" toggle that streams new lines until you stop it.

@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- **Discord webhooks in the GUI.** Settings has a Discord notifications card for the changes and status channels, with test buttons, masked display and validation. Saving a new status URL refreshes the backup and update-check jobs and each world's `valheim-notify.conf` on the VPS. URLs are stored in the git-ignored `notifications.json` and win over `config.json`.
 - **Firewall handling.** When the VPS runs an active `ufw`, the GUI opens a world's UDP game ports (port to port+2) when the port is saved in Setup step 3 or Settings and before the first start in step 8, moves the rule when the port changes, and closes it when the world is uninstalled. It never enables or disables `ufw` and never touches other rules. A new Setup checklist item shows the state.
 - **Uninstall a world from the VPS.** Removing an extra world can now also stop its processes, remove its cron jobs and files, and delete its game account and home folder, optionally keeping a copy of the saves and backups first. Guarded by a typed `DELETE` confirmation, a size preview, and strict checks that only `vhserver-<id>` for that world can be touched.
 

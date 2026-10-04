@@ -33,4 +33,11 @@ Saving a schedule on the Backups or Updates page installs a real cron job on the
 
 ## Discord
 
-Two channels are supported: `discordWebhookUrl` for mod-change summaries and `discordStatusWebhookUrl` for the cron jobs. A "Notify Discord" send reports whether the message really went through; if the webhook is wrong, you get an alert and your pending changes stay queued.
+Two channels are supported, and both are set in **Settings, then Discord notifications**:
+
+- **Changes channel:** mod-change summaries from the Mods tab's "Notify Discord" button.
+- **Status channel:** automatic alerts from the cron jobs (backup failed, server restarted after a backup, update available). If it is empty, these go to the changes channel.
+
+Keeping them separate lets you mute or restrict the noisy one without losing the alerts that matter. Each field has a **Send test** button that also works on a URL you have typed but not saved yet. Once saved, the full URL is never shown again, only its last four characters.
+
+When the status channel in effect changes, the GUI refreshes it on the VPS for every installed world: it regenerates the enabled backup and update-check wrapper scripts and updates `DISCORD_WEBHOOK_URL` in each world's `valheim-notify.conf` (other lines such as `CLOUD_REMOTE` are kept). You do not need to re-save the schedules. A "Notify Discord" send reports whether the message really went through; if the webhook is wrong, you get an alert and your pending changes stay queued.

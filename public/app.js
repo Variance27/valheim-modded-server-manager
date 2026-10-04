@@ -661,6 +661,7 @@ function showPage(page, { focus = false } = {}) {
       loadSettings();
       loadModifiers();
       loadLists();
+      loadDiscord();
     }
     if (page === 'configs') loadConfigList();
     if (page === 'pz-backups') pzListBackups();
@@ -3268,6 +3269,72 @@ async function saveModifiers() {
     toast('error', 'Could not save modifiers', e.message);
   } finally {
     setBtnLoading(btn, false);
+  }
+}
+
+/* ---- Discord webhooks (API: /api/discord) ---- */
+
+function renderDiscordState(r) {
+  for (const k of ['changes', 'status']) {
+    const d = r[k];
+    const el = $(`dc-${k}-state`);
+    if (!el) continue;
+    let t = 'Not set.';
+    if (d.set) t = `Saved: ${d.masked} (from ${d.source}).`;
+    else if (k === 'status' && d.usingChanges) t = 'Not set: using the changes channel.';
+    el.textContent = t;
+    $(`dc-${k}-clear`).disabled = !d.set;
+    $(`dc-${k}`).value = '';
+  }
+}
+async function loadDiscord() {
+  if (!$('dc-changes')) return;
+  try {
+    renderDiscordState(await api('/api/discord'));
+  } catch (e) {
+    $('dc-note').textContent = e.message;
+  }
+}
+async function postDiscord(body, btn) {
+  setBtnLoading(btn, true);
+  try {
+    const r = await api('/api/discord', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    renderDiscordState(r);
+    const bad = (r.applied || []).filter((a) => !a.ok);
+    if (bad.length) toast('error', 'Saved, but some worlds were not updated', bad.map((a) => `${a.world}: ${a.message}`).join('; '));
+    else toast('success', 'Discord webhooks saved', (r.applied || []).length ? r.applied.map((a) => `${a.world}: ${a.message}`).join('; ') : undefined);
+  } catch (e) {
+    toast('error', 'Could not save webhooks', e.message);
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+async function saveDiscord() {
+  const body = {};
+  const c = $('dc-changes').value.trim();
+  const s = $('dc-status').value.trim();
+  if (c) body.changes = c;
+  if (s) body.status = s;
+  if (!Object.keys(body).length) return toast('info', 'Nothing to save', 'Paste a webhook URL first.');
+  await postDiscord(body, $('dc-save'));
+}
+async function clearDiscord(which) {
+  const ok = await confirmDialog({
+    title: `Remove the ${which} webhook?`,
+    html: which === 'status' ? 'Backup and update alerts will use the changes channel, or stop if that is empty.' : 'The Mods tab\'s "Notify Discord" button will stop working until you add another URL.',
+    confirmLabel: 'Remove',
+    tone: 'warn',
+  });
+  if (!ok) return;
+  await postDiscord({ [which]: '' }, $(`dc-${which}-clear`));
+}
+async function testDiscord(which) {
+  try {
+    const r = await api('/api/discord/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ which, url: $(`dc-${which}`).value.trim() }) });
+    if (r.ok) toast('success', 'Test message sent', `Check the ${which} channel in Discord.`);
+    else toast('error', 'Test failed', r.error || 'unknown error');
+  } catch (e) {
+    toast('error', 'Test failed', e.message);
   }
 }
 

@@ -621,10 +621,10 @@ function asLgsmUser(cmd) {
 // Returns true on success, false on failure — callers propagate this back
 // to the GUI instead of assuming it worked, so "Sent!" only shows when a
 // message actually went through.
-async function notifyDiscord(message) {
-  if (!config.discordWebhookUrl) return false;
+async function postWebhook(url, message) {
+  if (!url) return false;
   try {
-    const r = await fetch(config.discordWebhookUrl, {
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: message }),
@@ -638,6 +638,9 @@ async function notifyDiscord(message) {
     console.error('Discord notification failed:', e.message);
     return false;
   }
+}
+async function notifyDiscord(message) {
+  return postWebhook(changesWebhook(), message);
 }
 
 function shq(str) {
@@ -1591,10 +1594,35 @@ async function writeRootFile(filePath, content, mode) {
   if (!r.stdout.includes('WROTE')) throw new Error(`could not write ${filePath}: ${r.stdout} ${r.stderr}`.trim());
 }
 
-// Webhook for server status / backups / update checks (the cron jobs). Separate from
-// discordWebhookUrl, which the mod-changes notification uses. Falls back to that one if unset.
+// Discord webhooks. Two channels: "changes" (the Mods tab's "Notify Discord" summaries) and "status"
+// (cron-job alerts: backup failures, server restarted after backup, update available; falls back to the
+// changes channel when unset). The Settings tab saves them to notifications.json (git-ignored, mode 600);
+// a value saved there wins over discordWebhookUrl / discordStatusWebhookUrl in config.json, which
+// stay valid as the starting point.
+const NOTIFY_PATH = path.join(__dirname, 'notifications.json');
+const WEBHOOK_RE = /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api\/webhooks\/\d{5,25}\/[A-Za-z0-9_-]{20,120}$/;
+function readNotify() {
+  try {
+    const j = JSON.parse(fs.readFileSync(NOTIFY_PATH, 'utf8'));
+    return j && typeof j === 'object' ? j : {};
+  } catch (e) {
+    return {};
+  }
+}
+function writeNotify(obj) {
+  fs.writeFileSync(NOTIFY_PATH, JSON.stringify(obj, null, 2) + '\n', { mode: 0o600 });
+  try { fs.chmodSync(NOTIFY_PATH, 0o600); } catch (e) { /* best effort (Windows) */ }
+}
+function changesWebhook() {
+  const n = readNotify();
+  return typeof n.changesWebhookUrl === 'string' ? n.changesWebhookUrl : config.discordWebhookUrl || '';
+}
+function ownStatusWebhook() {
+  const n = readNotify();
+  return typeof n.statusWebhookUrl === 'string' ? n.statusWebhookUrl : config.discordStatusWebhookUrl || '';
+}
 function statusWebhook() {
-  return config.discordStatusWebhookUrl || config.discordWebhookUrl || '';
+  return ownStatusWebhook() || changesWebhook();
 }
 
 function buildBackupWrapper(P, onlyEmpty) {
@@ -1795,6 +1823,99 @@ app.post('/api/update/schedule', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---- Discord webhooks (API: /api/discord) ----
+function maskWebhook(u) {
+  const m = /\/webhooks\/(\d+)\//.exec(u || '');
+  return u ? `discord.com/api/webhooks/${m ? m[1] : '…'}/••••${u.slice(-4)}` : '';
+}
+function discordState() {
+  const n = readNotify();
+  const src = (fileKey, cfgVal) => (typeof n[fileKey] === 'string' ? 'GUI' : cfgVal ? 'config.json' : 'none');
+  const ch = changesWebhook();
+  const stOwn = ownStatusWebhook();
+  return {
+    changes: { set: !!ch, masked: maskWebhook(ch), source: src('changesWebhookUrl', config.discordWebhookUrl) },
+    status: { set: !!stOwn, masked: maskWebhook(stOwn), source: src('statusWebhookUrl', config.discordStatusWebhookUrl), usingChanges: !stOwn && !!ch },
+  };
+}
+
+// Pushes the status webhook into one world's VPS-side pieces: the backup and update-check cron
+// wrappers (their URL is written into the script) and valheim-notify.conf (read by the backup,
+// update-check and update scripts when you run them by hand).
+async function applyStatusWebhookToWorld() {
+  const done = [];
+  const here = await sshExec(`[ -x ${shq(config.paths.lgsmScript)} ] && echo YES`);
+  if (!here.stdout.includes('YES')) return 'not installed yet, skipped';
+  for (const kind of ['backup', 'update']) {
+    const cur = await readCronJob(kind);
+    if (!cur.enabled) continue;
+    await installCronJob(kind, true, cur.intervalHours, cur.onlyWhenEmpty);
+    done.push(`${kind} schedule refreshed`);
+  }
+  const url = statusWebhook();
+  const f = `${config.lgsmHome}/.config/valheim-notify.conf`;
+  const script = [
+    `F=${shq(f)}`,
+    `U=${shq(config.lgsmUser)}`,
+    '[ -d "$(dirname "$F")" ] || { echo SKIP; exit 0; }',
+    url ? '[ -f "$F" ] || touch "$F"' : '[ -f "$F" ] || { echo SKIP; exit 0; }',
+    'T=$(mktemp)',
+    `grep -Ev '^[[:space:]]*(export[[:space:]]+)?DISCORD_WEBHOOK_URL=' "$F" > "$T" || true`,
+    url ? `printf '%s\\n' ${shq(`DISCORD_WEBHOOK_URL='${url}'`)} >> "$T"` : ':',
+    'cat "$T" > "$F"; rm -f "$T"',
+    'chown "$U":"$U" "$F" 2>/dev/null || true',
+    'chmod 600 "$F"',
+    'echo SYNCED',
+  ].join('\n');
+  const r = await sshExec(asRootScript(script));
+  if (r.stdout.includes('SYNCED')) done.push('valheim-notify.conf updated');
+  return done.length ? done.join(', ') : 'nothing to change';
+}
+
+app.get('/api/discord', (req, res) => res.json(discordState()));
+
+app.post('/api/discord', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const next = readNotify();
+    const before = statusWebhook();
+    for (const [field, key] of [['changes', 'changesWebhookUrl'], ['status', 'statusWebhookUrl']]) {
+      if (body[field] === undefined) continue;
+      const v = String(body[field]).trim();
+      if (v && !WEBHOOK_RE.test(v)) {
+        return res.status(400).json({ error: `The ${field} webhook is not a Discord webhook URL (it should look like https://discord.com/api/webhooks/<id>/<token>).` });
+      }
+      next[key] = v;
+    }
+    writeNotify(next);
+    const applied = [];
+    if (statusWebhook() !== before) {
+      for (const id of worldList()) {
+        try {
+          const msg = await inWorld(id, async () => ({ world: config.instance.label, message: await applyStatusWebhookToWorld() }));
+          applied.push({ ...msg, ok: true });
+        } catch (e) {
+          applied.push({ world: id, ok: false, message: e.message });
+        }
+      }
+    }
+    res.json({ ...discordState(), applied });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/discord/test', async (req, res) => {
+  const which = (req.body || {}).which === 'status' ? 'status' : 'changes';
+  const typed = String((req.body || {}).url || '').trim();
+  if (typed && !WEBHOOK_RE.test(typed)) return res.json({ ok: false, error: 'That is not a Discord webhook URL.' });
+  const url = typed || (which === 'status' ? statusWebhook() : changesWebhook());
+  if (!url) return res.json({ ok: false, error: 'No webhook URL is set for this channel.' });
+  const brand = (await getWorldInfo()).brand;
+  const ok = await postWebhook(url, `✅ Test message from the ${brand} server manager (${which} channel). If you can read this, the webhook works.`);
+  res.json({ ok, error: ok ? undefined : 'Discord rejected the message or was unreachable. Check the URL (the webhook may have been deleted).' });
 });
 
 // ---- Server settings + player lists (API: /api/settings, /api/lists) ----
@@ -3647,8 +3768,8 @@ app.post('/api/mods/notify-summary', async (req, res) => {
     );
   }
   if (!sections.length) return res.json({ ok: true, skipped: true });
-  if (!config.discordWebhookUrl) {
-    return res.json({ ok: false, error: 'discordWebhookUrl is not set in config.json' });
+  if (!changesWebhook()) {
+    return res.json({ ok: false, error: 'No "changes" Discord webhook is set. Add one in Settings, then Discord notifications.' });
   }
 
   const brand = (await getWorldInfo()).brand;

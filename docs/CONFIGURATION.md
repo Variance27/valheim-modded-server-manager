@@ -38,7 +38,9 @@ A fresh server needs only the `ssh` block (plus, optionally, `guiPort` and `publ
 | `discordWebhookUrl` | Channel for the Mods tab's "Notify Discord" summaries. |
 | `discordStatusWebhookUrl` | Channel for the cron jobs: backup failures, "server restarted after backup", update available. Falls back to `discordWebhookUrl`. |
 
-Webhook URLs are secrets. Anyone who has one can post to the channel, so regenerate it if it leaks. If you change a webhook or script path, re-save the schedules so the wrapper scripts are regenerated.
+You do not have to edit these by hand. **Settings, then Discord notifications** saves both URLs to `notifications.json` (see below), and a URL saved there wins over the one in `config.json`. The `config.json` keys remain as the starting value.
+
+Webhook URLs are secrets. Anyone who has one can post to the channel, so regenerate it if it leaks.
 
 ## Paths (advanced)
 
@@ -67,6 +69,7 @@ A `zomboid` block enables an extra tab for a Project Zomboid server on the same 
 | --- | --- |
 | `auth.json` | The GUI login (scrypt hash). Delete it and restart to get a new random password. |
 | `instances.json` | The list of extra worlds. `config.json` is never rewritten. |
+| `notifications.json` | The Discord webhook URLs saved from the Settings tab (file mode 600, git-ignored). Treat it like a password. |
 | `.cache/` | Caches and the pending-changes lists behind the restart-required banner. |
 
 All three are in `.gitignore`.

@@ -641,6 +641,35 @@
             <span class="card-note" id="wm-preview"></span>
           </div>
         </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">Discord notifications</h2><p class="card-sub">Two channels, shared by all worlds (alerts from extra worlds start with the world's name). Saved on the machine running this GUI; the full URL is never shown again.</p></div></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;padding:8px 16px 8px">
+            <div>
+              <label class="card-title" style="font-size:13px" for="dc-changes">Changes channel</label>
+              <p class="card-note" style="margin:2px 0 8px">Mod install, update and remove summaries sent by the Mods tab's "Notify Discord" button.</p>
+              <input class="input" id="dc-changes" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…" style="width:100%">
+              <p class="card-note" id="dc-changes-state" style="margin:6px 0 8px"></p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-sm" onclick="testDiscord('changes')">Send test</button>
+                <button class="btn btn-sm" id="dc-changes-clear" onclick="clearDiscord('changes')">Remove</button>
+              </div>
+            </div>
+            <div>
+              <label class="card-title" style="font-size:13px" for="dc-status">Status channel</label>
+              <p class="card-note" style="margin:2px 0 8px">Automatic alerts: backup failed, server restarted after a backup, server update available. Leave empty to use the changes channel.</p>
+              <input class="input" id="dc-status" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…" style="width:100%">
+              <p class="card-note" id="dc-status-state" style="margin:6px 0 8px"></p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-sm" onclick="testDiscord('status')">Send test</button>
+                <button class="btn btn-sm" id="dc-status-clear" onclick="clearDiscord('status')">Remove</button>
+              </div>
+            </div>
+          </div>
+          <div style="padding:8px 16px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="dc-save" onclick="saveDiscord()">Save webhooks</button>
+            <span class="card-note" id="dc-note">Saving a new status URL also updates the backup and update-check jobs on the VPS for every world.</span>
+          </div>
+        </div>
         <div class="card">
           <div class="card-head"><div><h2 class="card-title">Admins, bans and whitelist</h2><p class="card-sub">SteamID64 (17 digits). Changes apply within about a minute — no restart.</p></div></div>
           <div id="lists-wrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:8px 16px 16px"></div>

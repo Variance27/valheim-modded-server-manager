@@ -2,6 +2,7 @@
 config.json
 auth.json
 instances.json
+notifications.json
 .cache/
 
 # Dependencies and logs
