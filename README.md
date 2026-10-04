@@ -81,6 +81,10 @@ For the full walkthrough, see [Getting started](docs/GETTING_STARTED.md).
 - The players-online list is derived from log lines because Valheim has no player API; it can be briefly wrong after a crash.
 - The tool is not affiliated with Iron Gate Studio, LinuxGSM, BepInEx, Thunderstore, Hexium or the ValheimEnforcer author.
 
+## Support
+
+This project is free and open source. If it saved you time, you can [buy me a coffee on Ko-fi](https://ko-fi.com/oteeeeeep). It is never expected.
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
