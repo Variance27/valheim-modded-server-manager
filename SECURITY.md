@@ -6,6 +6,7 @@ This tool holds a root-capable connection to your VPS, so treat the GUI like a r
 
 - **Keep it on localhost.** The GUI binds to `127.0.0.1` by default. Do not change `bindHost` without real protection in front of it. If you host it somewhere reachable, put it behind HTTPS (an SSH tunnel, Tailscale Serve, Cloudflare Tunnel, or nginx with Let's Encrypt) and set `"trustProxy": true`. Never expose it to the public internet over plain HTTP.
 - **Protect `config.json`, `auth.json` and `notifications.json`.** They are in `.gitignore`. `config.json` contains your VPS password in plain text if you use one, `auth.json` contains the GUI login hash, and `notifications.json` holds your Discord webhook URLs (anyone with one can post to the channel). Never commit, paste or screenshot them.
+- **The Discord bot token** (only if you install the optional bot) is stored in `/etc/valheim-gui-bot.env` on the VPS, readable by root only. If it leaks, reset it in the Discord developer portal. See [docs/DISCORD_BOT.md](docs/DISCORD_BOT.md).
 - **Prefer an SSH key** (`ssh.privateKeyPath`) over a password, and disable SSH password login on the VPS once the key works.
 - **Do not use the default or weak game passwords.** The Settings page flags very common passwords.
 - **Treat webhook URLs as secrets.** A Discord webhook URL lets anyone post to the channel. If one leaks, delete it in Discord and create a new one.

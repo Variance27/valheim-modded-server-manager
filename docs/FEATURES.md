@@ -55,6 +55,10 @@ The admin, banned and permitted lists live in `adminlist.txt`, `bannedlist.txt` 
 
 The second card on the Settings tab holds the two webhook URLs (changes and status), a test button for each, and a Remove button. Details: [Backups and scheduling](BACKUPS_AND_SCHEDULING.md#discord).
 
+## Discord bot
+
+Optional card on the Settings tab that installs, configures and removes the `/codes` bot. See [Discord bot](DISCORD_BOT.md).
+
 ## Logs
 
 A snapshot of the LinuxGSM console log or `LogOutput.log`, plus a "Go Live" toggle that streams new lines until you stop it.

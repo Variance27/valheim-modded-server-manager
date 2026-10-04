@@ -670,6 +670,35 @@
             <span class="card-note" id="dc-note">Saving a new status URL also updates the backup and update-check jobs on the VPS for every world.</span>
           </div>
         </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><h2 class="card-title">Discord bot <span class="badge" id="bot-badge" style="margin-left:6px"></span></h2><p class="card-sub">Optional. Lets people with permission type <code>/codes</code> in Discord to get the Gale profile code for any world. Runs as a service on the VPS, so it keeps working when this GUI is closed.</p></div></div>
+          <details style="padding:0 16px 8px">
+            <summary class="card-note" style="cursor:pointer">How to get the token and IDs (one time, in Discord)</summary>
+            <ol class="card-note" style="margin:8px 0 0 18px;line-height:1.6">
+              <li>Open <span class="mono">discord.com/developers/applications</span>, click <strong>New Application</strong>, name it.</li>
+              <li>On the <strong>Bot</strong> page press <strong>Reset Token</strong> and copy it. Leave the privileged intents off.</li>
+              <li>On <strong>OAuth2, URL Generator</strong> tick the scopes <span class="mono">bot</span> and <span class="mono">applications.commands</span>, tick the permission <strong>Send Messages</strong>, open the generated link and add the bot to your server.</li>
+              <li>In Discord, Settings, Advanced, turn on <strong>Developer Mode</strong>. Right-click your server and choose <strong>Copy Server ID</strong>. Right-click your own name and choose <strong>Copy User ID</strong>.</li>
+            </ol>
+          </details>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;padding:8px 16px 8px">
+            <div><label class="card-note" for="bot-token">Bot token</label><input class="input" id="bot-token" type="password" autocomplete="new-password" spellcheck="false" style="width:100%" placeholder="Paste the token"></div>
+            <div><label class="card-note" for="bot-guild">Server ID (makes /codes appear at once)</label><input class="input" id="bot-guild" type="text" inputmode="numeric" autocomplete="off" style="width:100%"></div>
+            <div><label class="card-note" for="bot-users">Allowed user IDs (comma separated)</label><input class="input" id="bot-users" type="text" autocomplete="off" style="width:100%"></div>
+            <div><label class="card-note" for="bot-roles">Allowed role IDs (optional)</label><input class="input" id="bot-roles" type="text" autocomplete="off" style="width:100%"></div>
+          </div>
+          <p class="card-note" id="bot-state" style="padding:0 16px"></p>
+          <div style="padding:8px 16px 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary" id="bot-install" onclick="installBot()">Install and start</button>
+            <button class="btn btn-sm" id="bot-restart" onclick="botService('restart')">Restart</button>
+            <button class="btn btn-sm" id="bot-stop" onclick="botService('stop')">Stop</button>
+            <button class="btn btn-sm" id="bot-start" onclick="botService('start')">Start</button>
+            <button class="btn btn-sm" id="bot-worlds" onclick="refreshBotWorlds()">Refresh worlds</button>
+            <button class="btn btn-sm" id="bot-log" onclick="showBotLog()">View log</button>
+            <button class="btn btn-sm" id="bot-remove" onclick="removeBot()">Remove bot</button>
+          </div>
+          <div style="padding:0 16px 16px"><pre id="bot-output" class="console short" data-empty="Nothing run yet."></pre></div>
+        </div>
         <div class="card">
           <div class="card-head"><div><h2 class="card-title">Admins, bans and whitelist</h2><p class="card-sub">SteamID64 (17 digits). Changes apply within about a minute — no restart.</p></div></div>
           <div id="lists-wrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:8px 16px 16px"></div>

@@ -662,6 +662,7 @@ function showPage(page, { focus = false } = {}) {
       loadModifiers();
       loadLists();
       loadDiscord();
+      loadBot();
     }
     if (page === 'configs') loadConfigList();
     if (page === 'pz-backups') pzListBackups();
@@ -3335,6 +3336,103 @@ async function testDiscord(which) {
     else toast('error', 'Test failed', r.error || 'unknown error');
   } catch (e) {
     toast('error', 'Test failed', e.message);
+  }
+}
+
+/* ---- Discord /codes bot (API: /api/bot) ---- */
+
+let botSt = null;
+function renderBot(st) {
+  botSt = st;
+  const badge = $('bot-badge');
+  const managed = st.unit === 'managed';
+  const running = st.active === 'active';
+  badge.className = `badge ${running ? 'good' : managed ? 'warn' : ''}`;
+  badge.textContent = st.unit === 'foreign' ? 'Not managed by the GUI' : !st.installed ? 'Not installed' : running ? 'Running' : 'Stopped';
+  const lines = [];
+  if (st.unit === 'foreign') lines.push(`A service named valheim-codes-bot already runs on the VPS (state: ${st.active}) but was not created by this GUI, so the GUI leaves it alone. Remove or rename it on the VPS first if you want to manage the bot from here.`);
+  else if (st.installed) lines.push(`Worlds offered in /codes: ${st.worlds.length ? st.worlds.map((w) => w.label).join(', ') : 'none'}.${st.hasToken ? ' A token is saved (leave the field empty to keep it).' : ''}`);
+  else lines.push('Not installed. Installing takes about a minute (it sets up a small Python environment on the VPS).');
+  $('bot-state').textContent = lines.join(' ');
+  if (managed) {
+    $('bot-guild').value = st.guildId;
+    $('bot-users').value = st.userIds;
+    $('bot-roles').value = st.roleIds;
+  }
+  $('bot-token').placeholder = st.hasToken ? 'Saved. Paste only to replace it.' : 'Paste the token';
+  $('bot-install').textContent = managed ? 'Save and restart' : 'Install and start';
+  $('bot-install').disabled = st.unit === 'foreign';
+  for (const id of ['bot-restart', 'bot-log', 'bot-worlds', 'bot-remove']) $(id).disabled = !managed;
+  $('bot-stop').disabled = !managed || !running;
+  $('bot-start').disabled = !managed || running;
+  if (st.unit === 'foreign') $('bot-log').disabled = false;
+}
+async function loadBot() {
+  if (!$('bot-state')) return;
+  try {
+    renderBot(await api('/api/bot'));
+  } catch (e) {
+    $('bot-state').textContent = e.message;
+  }
+}
+async function installBot() {
+  const btn = $('bot-install');
+  const out = $('bot-output');
+  out.textContent = '';
+  setBtnLoading(btn, true);
+  const full = await streamPost('/api/bot/install', {
+    token: $('bot-token').value.trim(),
+    guildId: $('bot-guild').value.trim(),
+    userIds: $('bot-users').value.trim(),
+    roleIds: $('bot-roles').value.trim(),
+  }, out);
+  setBtnLoading(btn, false);
+  const ok = outcomeOf(full) === 'success' && /Done\. Type \/codes/.test(full);
+  if (ok) $('bot-token').value = '';
+  toast(ok ? 'success' : 'error', ok ? 'Discord bot is running' : 'Bot install failed', ok ? 'Type /codes in your Discord server.' : 'See the output below the buttons.');
+  recordEvent(ok ? 'good' : 'bad', 'Discord bot', ok ? 'installed' : 'failed', 'send');
+  await loadBot();
+}
+async function botService(action) {
+  try {
+    renderBot(await api('/api/bot/service', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }));
+    toast('success', `Bot ${action} done`);
+  } catch (e) {
+    toast('error', `Could not ${action} the bot`, e.message);
+  }
+}
+async function refreshBotWorlds() {
+  try {
+    const r = await api('/api/bot/worlds', { method: 'POST' });
+    toast('success', 'Worlds refreshed', `/codes now offers ${pluralize(r.worlds, 'world')}.`);
+    await loadBot();
+  } catch (e) {
+    toast('error', 'Could not refresh worlds', e.message);
+  }
+}
+async function showBotLog() {
+  try {
+    const r = await api('/api/bot/logs');
+    $('bot-output').textContent = r.text;
+  } catch (e) {
+    toast('error', 'Could not read the log', e.message);
+  }
+}
+async function removeBot() {
+  const ok = await confirmDialog({
+    title: 'Remove the Discord bot?',
+    html: '<p>This stops the service and deletes its files and saved token from the VPS. The Discord application itself stays; delete it in the developer portal if you no longer want it.</p>',
+    confirmLabel: 'Remove bot',
+    tone: 'danger',
+  });
+  if (!ok) return;
+  try {
+    await api('/api/bot', { method: 'DELETE' });
+    toast('success', 'Discord bot removed');
+    $('bot-output').textContent = '';
+    await loadBot();
+  } catch (e) {
+    toast('error', 'Could not remove the bot', e.message);
   }
 }
 

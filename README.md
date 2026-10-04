@@ -13,12 +13,13 @@ It manages the stack most modded servers use: [LinuxGSM](https://linuxgsm.com) r
 - **Guided setup (Setup tab).** Eight steps with live output take Ubuntu or Debian from nothing to a running modded server: LinuxGSM, the Valheim server, name/world/password/port, BepInEx, the `common.cfg` wiring (previewed and backed up first), ValheimEnforcer and its dependencies, helper scripts, and a start-and-verify check. A checklist shows when everything is up.
 - **Several worlds at once.** Each extra world is its own isolated instance (own game account, files, mods, port, backups and schedules). A world switcher in the sidebar points every tab at one world, and a world can be uninstalled from the VPS again (account, files, jobs and firewall rule) with an optional backup copy.
 - **Mods.** List what is installed, check for updates against Hexium and Thunderstore, install and update with a Source/Author/Version prompt, disable, remove, and recategorize mods for ValheimEnforcer. Dependencies are checked, and Gale deep links make joining easy.
-- **Player codes.** Generate Gale profile codes for players and admins straight from the installed mods.
+- **Player codes.** Generate Gale profile codes for players and admins straight from the installed mods, from the GUI or, optionally, with a `/codes` command in Discord.
 - **Backups.** Run, list and restore backups; schedule them with cron on the VPS (skipped when the server is stopped or, if you choose, while players are online). Server updates take a backup first and stop if it fails.
 - **Updates.** Check for a new Valheim build and apply it behind the backup gate, with optional scheduled checks.
 - **Dashboard and logs.** Server status, CPU, memory and disk charts, a live best-effort players-online list, world-saved health, and live log streaming.
 - **Settings.** Server name, password, port, autosave and world modifiers; admin, ban and permitted lists; a mod config editor for BepInEx `.cfg` files.
-- **Discord notifications** for backup failures, update availability and mod changes (optional).
+- **Discord notifications** for backup failures, update availability and mod changes (optional), set up from the Settings tab with separate status and changes channels.
+- **Optional Discord bot** that answers `/codes` for any world, installed and removed from the GUI.
 - **Safe by default.** Login with a hashed password, localhost-only binding, a restart-required banner, and a `.bak.<timestamp>` copy before any config file is changed.
 - **Optional Project Zomboid tab** for people who run both games.
 
@@ -61,6 +62,7 @@ For the full walkthrough, see [Getting started](docs/GETTING_STARTED.md).
 | [Multiple worlds](docs/MULTIPLE_WORLDS.md) | Running more than one world on one VPS |
 | [Mods and ValheimEnforcer](docs/MODS_AND_ENFORCER.md) | How mods are matched, categorized, updated and turned into player codes |
 | [Backups and scheduling](docs/BACKUPS_AND_SCHEDULING.md) | Backups, restore, cron jobs and Discord alerts |
+| [Discord bot](docs/DISCORD_BOT.md) | The optional `/codes` bot and how to set it up |
 | [VPS helper scripts](docs/VPS_SCRIPTS.md) | The scripts installed on the VPS and how they work |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Fixes for problems seen in real use |
 | [Architecture](docs/ARCHITECTURE.md) | How the GUI is built, for contributors |

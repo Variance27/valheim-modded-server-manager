@@ -9,6 +9,7 @@ The `vps-scripts/` folder holds scripts that run **on the VPS**. The GUI uploads
 | `backup-valheim.sh` | `<scriptsDir>` | Stop, archive, restart, verify, prune, optional cloud upload. |
 | `check-valheim-update.sh` | `<scriptsDir>` | Asks Steam for the latest public build and compares it with the installed one. Read-only; safe to run any time. Optional auto-apply with `AUTO_APPLY_UPDATE=true` in `valheim-notify.conf`. |
 | `update-valheim.sh` | `<scriptsDir>` | Backup gate, then LinuxGSM's own `update`, then start. Aborts if the backup fails. |
+| `discord-codes-bot.py` | `/opt/valheim-gui-bot/` | The optional `/codes` bot. Installed by Settings, Discord bot, not by Setup step 7. See [Discord bot](DISCORD_BOT.md). |
 | `move-mod.py` | `<scriptsDir>` | Moves a mod between ValheimEnforcer categories, deletes entries, manages the sidecar files. |
 | `generate-codes.py` | `<scriptsDir>` | Builds Gale profile codes from the installed mods. |
 
