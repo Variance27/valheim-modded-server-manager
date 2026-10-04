@@ -11,7 +11,7 @@ It manages the stack most modded servers use: [LinuxGSM](https://linuxgsm.com) r
 ## Features
 
 - **Guided setup (Setup tab).** Eight steps with live output take Ubuntu or Debian from nothing to a running modded server: LinuxGSM, the Valheim server, name/world/password/port, BepInEx, the `common.cfg` wiring (previewed and backed up first), ValheimEnforcer and its dependencies, helper scripts, and a start-and-verify check. A checklist shows when everything is up.
-- **Several worlds at once.** Each extra world is its own isolated instance (own game account, files, mods, port, backups and schedules). A world switcher in the sidebar points every tab at one world.
+- **Several worlds at once.** Each extra world is its own isolated instance (own game account, files, mods, port, backups and schedules). A world switcher in the sidebar points every tab at one world, and a world can be uninstalled from the VPS again (account, files and jobs) with an optional backup copy.
 - **Mods.** List what is installed, check for updates against Hexium and Thunderstore, install and update with a Source/Author/Version prompt, disable, remove, and recategorize mods for ValheimEnforcer. Dependencies are checked, and Gale deep links make joining easy.
 - **Player codes.** Generate Gale profile codes for players and admins straight from the installed mods.
 - **Backups.** Run, list and restore backups; schedule them with cron on the VPS (skipped when the server is stopped or, if you choose, while players are online). Server updates take a backup first and stop if it fails.

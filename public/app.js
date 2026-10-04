@@ -3774,17 +3774,35 @@ async function removeWorld(id) {
   const w = (worldsCache || []).find((x) => x.id === id);
   if (!w) return;
   if (w.state === 'active') return toast('warn', 'Stop this world first', 'A running world cannot be removed.');
-  const ok = await confirmDialog({
-    title: `Remove ${worldTitle(w)} from the GUI?`,
-    html: `<p>The GUI stops managing this world and removes its scheduled jobs. <strong>Nothing is deleted from the VPS</strong>: the game account <code>${esc(w.lgsmUser)}</code>, its files and its backups stay where they are.</p>`,
-    confirmLabel: 'Remove from GUI',
-    tone: 'danger',
-  });
-  if (!ok) return;
+  let pv = null;
   try {
-    const r = await api(`/api/instances/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    toast('success', 'World removed', r.note || '');
-    recordEvent('accent', `Removed world ${worldTitle(w)}`, 'from the GUI', 'server');
+    pv = await api(`/api/instances/${encodeURIComponent(id)}/uninstall-preview`);
+  } catch (e) {
+    /* the dialog still works without the size preview */
+  }
+  const size = pv && pv.userExists ? `${pv.sizeMB >= 1024 ? (pv.sizeMB / 1024).toFixed(1) + ' GB' : pv.sizeMB + ' MB'} on disk, ${pv.saves} world save${pv.saves === 1 ? '' : 's'}, ${pv.backups} backup file${pv.backups === 1 ? '' : 's'}` : null;
+  const res = await dialog({
+    title: `Remove ${worldTitle(w)}?`,
+    tone: 'danger',
+    html:
+      `<p><strong>Remove from GUI only</strong> keeps everything on the VPS: the game account <code>${esc(w.lgsmUser)}</code>, its files and its backups.</p>` +
+      `<p><strong>Delete everything</strong> uninstalls the world from the VPS: it stops any leftover processes, removes the scheduled jobs, and deletes the game account <code>${esc(w.lgsmUser)}</code> with its home folder (game files, mods, saves and backups)${size ? ` &mdash; ${esc(size)}` : ''}. <strong>This cannot be undone.</strong> <em>Delete, keep a copy</em> first copies the world saves and backups to <code>/var/lib/valheim-removed-worlds/</code> on the VPS.</p>` +
+      `<p>The other worlds are not touched.</p>`,
+    input: { label: 'To enable the delete buttons, type <code>DELETE</code>', placeholder: 'DELETE', match: 'DELETE' },
+    actions: [
+      { key: 'forget', label: 'Remove from GUI only', variant: 'btn-ghost' },
+      { key: 'keep', label: 'Delete, keep a copy', variant: 'btn-warn', needsMatch: true },
+      { key: 'purge', label: 'Delete everything', variant: 'btn-danger', needsMatch: true },
+    ],
+  });
+  if (!res || !res.key) return;
+  const mode = res.key;
+  const q = mode === 'purge' ? '?purge=1' : mode === 'keep' ? '?purge=1&keep=1' : '';
+  try {
+    if (mode !== 'forget') toast('info', 'Uninstalling…', 'Deleting the world from the VPS can take a minute.');
+    const r = await api(`/api/instances/${encodeURIComponent(id)}${q}`, { method: 'DELETE' });
+    toast('success', mode === 'forget' ? 'World removed' : 'World uninstalled', r.note || '');
+    recordEvent('accent', `${mode === 'forget' ? 'Removed' : 'Uninstalled'} world ${worldTitle(w)}`, mode === 'forget' ? 'from the GUI' : 'deleted from the VPS', 'server');
     if (id === currentWorldId) {
       await api('/api/instances/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'main' }) });
       location.reload();

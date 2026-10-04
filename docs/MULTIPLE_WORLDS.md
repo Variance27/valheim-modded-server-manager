@@ -29,7 +29,15 @@ Each world needs its own RAM and about 2 GB of disk. As a rough guide, a 12 GB, 
 
 ## Removing a world
 
-**Remove** only makes the GUI forget the world and removes its scheduled jobs. Its account, files and backups stay on the VPS. Delete the account yourself if you want it gone.
+Stop the world first, then press **Remove** on the Worlds page. You get three choices:
+
+- **Remove from GUI only** makes the GUI forget the world and removes its scheduled jobs. The game account, files and backups stay on the VPS.
+- **Delete everything** uninstalls the world from the VPS. It stops any leftover processes of the world's game account, removes its cron jobs, wrapper scripts, lock and status files, then deletes the account `vhserver-<id>` together with its home folder (game files, mods, saves and backups). This cannot be undone.
+- **Delete, keep a copy** does the same but first copies the world saves, the admin, ban and permitted lists, and the backups to `/var/lib/valheim-removed-worlds/<id>-<timestamp>/` on the VPS (readable by root only).
+
+The delete buttons stay disabled until you type `DELETE`, and the dialog shows how much disk the world uses and how many saves and backups it has. The main world cannot be uninstalled from the GUI, and the GUI refuses to delete anything that is not the `vhserver-<id>` account it created for that world. If an uninstall fails, the world stays listed so you can retry.
+
+Uninstalling does not close firewall ports. Remove the world's UDP rules yourself (for example `sudo ufw delete allow 2466:2468/udp`).
 
 ## Things to know
 

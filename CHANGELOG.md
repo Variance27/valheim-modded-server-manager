@@ -2,6 +2,12 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Uninstall a world from the VPS.** Removing an extra world can now also stop its processes, remove its cron jobs and files, and delete its game account and home folder, optionally keeping a copy of the saves and backups first. Guarded by a typed `DELETE` confirmation, a size preview, and strict checks that only `vhserver-<id>` for that world can be touched.
+
 ## [1.0.0] - 2026-10-05
 
 First public release.

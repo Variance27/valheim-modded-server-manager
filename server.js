@@ -804,7 +804,7 @@ app.post('/api/server/:action', async (req, res) => {
 //
 // A world is a complete, separate server instance (own game account, files, mods, backups, port).
 // Which world a request acts on is decided by the middleware near the top; these endpoints manage
-// the list itself. Removing a world here only forgets it in the GUI — its account and files stay.
+// the list itself. Removing a world forgets it in the GUI; with ?purge=1 it is also uninstalled from the VPS (see below).
 const worldList = () => ['main', ...readRegistry().map((i) => i.id)];
 function inWorld(id, fn) {
   const ctx = getInstanceCtx(id);
@@ -916,6 +916,115 @@ app.patch('/api/instances/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Uninstalling a world from the VPS ----
+//
+// "Remove" can either only forget a world in the GUI, or also delete it from the VPS: stop its
+// processes, remove its scheduled jobs and their files, optionally keep a copy of its saves and
+// backups, then delete its game account and home folder. Everything is derived from the world's
+// registry entry and checked against strict patterns first, and nothing but the account named
+// vhserver-<id> (and its own /home/vhserver-<id> folder) can ever be touched. The main world
+// cannot be uninstalled from here.
+const PURGE_ACCT_RE = /^vhserver-[a-z][a-z0-9]{0,9}$/;
+const KEPT_WORLDS_DIR = '/var/lib/valheim-removed-worlds';
+
+async function purgeTarget(entry) {
+  const id = entry.id;
+  const acct = entry.lgsmUser;
+  const mainUser = await inWorld('main', async () => config.lgsmUser);
+  if (id === 'main' || !PURGE_ACCT_RE.test(acct) || acct !== `vhserver-${id}` || acct === mainUser) {
+    throw new Error(`Refusing to delete: "${acct}" is not a game account this GUI created for an extra world.`);
+  }
+  if (readRegistry().some((x) => x.id !== id && x.lgsmUser === acct)) throw new Error('Another world uses the same game account; refusing to delete it.');
+  const home = `/home/${acct}`;
+  const cfgHome = await inWorld(id, async () => config.lgsmHome);
+  if (cfgHome !== home) throw new Error(`This world's home folder is ${cfgHome}, not ${home}; refusing to delete anything automatically.`);
+  return { id, acct, home };
+}
+
+app.get('/api/instances/:id/uninstall-preview', async (req, res) => {
+  try {
+    const entry = readRegistry().find((x) => x.id === req.params.id);
+    if (!entry) return res.status(404).json({ error: `Unknown world "${req.params.id}"` });
+    const t = await purgeTarget(entry);
+    const script = [
+      `ACCT=${shq(t.acct)}; HOME_DIR=${shq(t.home)}`,
+      'getent passwd "$ACCT" >/dev/null 2>&1 && echo "USER:1" || echo "USER:0"',
+      '[ -d "$HOME_DIR" ] && echo "SIZE_MB:$(du -sm "$HOME_DIR" 2>/dev/null | cut -f1)" || echo "SIZE_MB:0"',
+      'echo "BACKUPS:$(ls -1 "$HOME_DIR/backups" 2>/dev/null | wc -l)"',
+      'echo "WORLDS:$(ls -1 "$HOME_DIR/.config/unity3d/IronGate/Valheim/worlds_local" 2>/dev/null | grep -c "\\.db$")"',
+      'echo "PROCS:$(pgrep -u "$ACCT" 2>/dev/null | wc -l)"',
+    ].join('\n');
+    const r = await sshExec(asRootScript(script));
+    const get = (k) => Number((new RegExp(`${k}:(\\d+)`).exec(r.stdout) || [])[1] || 0);
+    res.json({ account: t.acct, home: t.home, userExists: get('USER') === 1, sizeMB: get('SIZE_MB'), backups: get('BACKUPS'), saves: get('WORLDS'), processes: get('PROCS') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+async function purgeWorldHost(entry, keepCopy) {
+  const t = await purgeTarget(entry);
+  const P = cronPaths();
+  const sfx = `-${t.id}`;
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const keepDir = `${KEPT_WORLDS_DIR}/${t.id}-${stamp}`;
+  const files = [
+    `${P.cronDir}/valheim-gui-backup${sfx}`,
+    `${P.cronDir}/valheim-gui-update-check${sfx}`,
+    `${P.binDir}/valheim-scheduled-backup${sfx}.sh`,
+    `${P.binDir}/valheim-update-check${sfx}.sh`,
+    `${P.logDir}/valheim-scheduled-backup${sfx}.status`,
+    `${P.logDir}/valheim-update-check${sfx}.status`,
+    `${P.lockDir}/valheim-scheduled-backup${sfx}.lock`,
+    `${P.stateDir}/valheim-scheduled-backup${sfx}.pending`,
+    `${P.stateDir}/valheim-update-check${sfx}.state`,
+  ];
+  const script = [
+    'set -u',
+    `ACCT=${shq(t.acct)}; HOME_DIR=${shq(t.home)}; KEEP=${keepCopy ? 1 : 0}; KEEPDIR=${shq(keepDir)}`,
+    'if getent passwd "$ACCT" >/dev/null 2>&1; then',
+    '  HAVE_USER=1',
+    '  [ "$(getent passwd "$ACCT" | cut -d: -f6)" = "$HOME_DIR" ] || { echo "[error] the account\'s home folder is not $HOME_DIR - refusing to delete anything"; exit 3; }',
+    'else',
+    '  HAVE_USER=0',
+    '  echo "[note] the account $ACCT does not exist (already deleted?)"',
+    'fi',
+    'if pgrep -u "$ACCT" >/dev/null 2>&1; then',
+    '  echo "[step] Stopping the running processes of $ACCT..."',
+    '  pkill -u "$ACCT"; sleep 3',
+    '  if pgrep -u "$ACCT" >/dev/null 2>&1; then pkill -9 -u "$ACCT"; sleep 1; fi',
+    '  pgrep -u "$ACCT" >/dev/null 2>&1 && { echo "[error] processes of $ACCT are still running"; exit 4; }',
+    'fi',
+    'if [ "$KEEP" = 1 ] && [ -d "$HOME_DIR" ]; then',
+    '  echo "[step] Keeping a copy of the saves and backups in $KEEPDIR ..."',
+    '  mkdir -p "$KEEPDIR" || { echo "[error] cannot create $KEEPDIR"; exit 6; }',
+    '  V="$HOME_DIR/.config/unity3d/IronGate/Valheim"',
+    '  if [ -d "$HOME_DIR/backups" ]; then cp -a "$HOME_DIR/backups" "$KEEPDIR/backups" || { echo "[error] could not copy the backups"; exit 6; }; fi',
+    '  if [ -d "$V/worlds_local" ]; then cp -a "$V/worlds_local" "$KEEPDIR/worlds_local" || { echo "[error] could not copy the world saves"; exit 6; }; fi',
+    '  for f in adminlist.txt bannedlist.txt permittedlist.txt; do [ -f "$V/$f" ] && cp -a "$V/$f" "$KEEPDIR/"; done',
+    '  chmod -R go-rwx "$KEEPDIR"',
+    '  if [ -n "$(ls -A "$KEEPDIR" 2>/dev/null)" ]; then echo "[note] copy kept in $KEEPDIR"; else rmdir "$KEEPDIR" 2>/dev/null; echo "[note] nothing to keep: this world had no saves or backups"; fi',
+    'fi',
+    'echo "[step] Removing scheduled jobs and their files..."',
+    'crontab -r -u "$ACCT" >/dev/null 2>&1 || true',
+    `rm -f -- ${files.map(shq).join(' ')}`,
+    'if [ "$HAVE_USER" = 1 ]; then',
+    '  echo "[step] Deleting the game account $ACCT and its home folder..."',
+    '  OUT="$(userdel -r -f "$ACCT" 2>&1)"; RC=$?',
+    '  getent passwd "$ACCT" >/dev/null 2>&1 && { echo "[error] could not delete the account: $OUT"; exit 5; }',
+    '  [ $RC -ne 0 ] && echo "[note] userdel said: $OUT"',
+    'fi',
+    'if [ -d "$HOME_DIR" ]; then echo "[step] Removing leftover files in $HOME_DIR ..."; rm -rf -- "$HOME_DIR"; fi',
+    '[ -d "$HOME_DIR" ] && { echo "[error] $HOME_DIR could not be removed"; exit 7; }',
+    'getent group "$ACCT" >/dev/null 2>&1 && groupdel "$ACCT" >/dev/null 2>&1',
+    'echo "[done] $ACCT and $HOME_DIR are gone."',
+  ].join('\n');
+  const r = await sshExec(asRootScript(script));
+  const out = `${r.stdout || ''}${r.stderr || ''}`.trim();
+  if (r.code && r.code !== 0) throw new Error(out.split('\n').filter((l) => /\[error\]/.test(l)).join(' ') || out || `uninstall failed (exit ${r.code})`);
+  return { log: out.split('\n').filter(Boolean), keptAt: keepCopy && /copy kept in/.test(out) ? keepDir : null };
+}
+
 app.delete('/api/instances/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -923,9 +1032,11 @@ app.delete('/api/instances/:id', async (req, res) => {
     const reg = readRegistry();
     const entry = reg.find((x) => x.id === id);
     if (!entry) return res.status(404).json({ error: `Unknown world "${id}"` });
+    const purge = req.query.purge === '1';
+    const keep = req.query.keep === '1';
     const sum = await worldSummary(id);
     if (sum.state === 'active') return res.status(409).json({ error: 'Stop this world first.' });
-    // Remove its scheduled jobs (best effort), then forget it.
+    // Remove its scheduled jobs (best effort).
     await inWorld(id, async () => {
       for (const kind of ['backup', 'update']) {
         try {
@@ -935,10 +1046,21 @@ app.delete('/api/instances/:id', async (req, res) => {
         }
       }
     });
+    // Uninstalling happens BEFORE the world is forgotten, so a failure leaves it listed and retryable.
+    let purged = null;
+    if (purge) purged = await inWorld(id, () => purgeWorldHost(entry, keep));
     writeRegistry(reg.filter((x) => x.id !== id));
     instanceCtx.delete(id);
     worldInfoCaches.delete(id);
-    res.json({ ok: true, note: `"${entry.label}" is no longer managed here. Its game account (${entry.lgsmUser}) and files are still on the VPS.` });
+    try {
+      fs.rmSync(pendingFile(id), { force: true });
+    } catch (e) {
+      /* no pending list */
+    }
+    const note = purge
+      ? `"${entry.label}" was uninstalled: game account ${entry.lgsmUser} and its files were deleted from the VPS.${purged && purged.keptAt ? ` A copy of its saves and backups is in ${purged.keptAt}.` : ''} Remember to close its UDP ports in your firewall.`
+      : `"${entry.label}" is no longer managed here. Its game account (${entry.lgsmUser}) and files are still on the VPS.`;
+    res.json({ ok: true, purged: !!purge, keptAt: purged ? purged.keptAt : null, log: purged ? purged.log : [], note });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

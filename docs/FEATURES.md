@@ -57,7 +57,7 @@ A snapshot of the LinuxGSM console log or `LogOutput.log`, plus a "Go Live" togg
 
 ## Worlds
 
-Run several worlds at the same time: [Multiple worlds](MULTIPLE_WORLDS.md).
+Run several worlds at the same time, and remove one cleanly (including deleting it from the VPS): [Multiple worlds](MULTIPLE_WORLDS.md).
 
 ![Worlds page](images/worlds.png)
 
