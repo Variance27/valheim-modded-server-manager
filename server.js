@@ -7,6 +7,9 @@ const path = require('path');
 const yaml = require('js-yaml');
 const zlib = require('zlib');
 const crypto = require('crypto');
+const modgraph = require('./modgraph');
+const modsets = require('./modsets');
+const migration = require('./migration');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 if (!fs.existsSync(CONFIG_PATH)) {
@@ -172,6 +175,10 @@ class LocalStream extends EventEmitter {
     this.stderr = new EventEmitter();
     child.stdout.on('data', (d) => this.emit('data', d));
     child.stderr.on('data', (d) => this.stderr.emit('data', d));
+    if (child.stdin) {
+      child.stdin.on('drain', () => this.emit('drain'));
+      child.stdin.on('error', () => {}); // the command ended before reading everything (EPIPE)
+    }
     child.on('error', (e) => {
       this.stderr.emit('data', Buffer.from(`[error] ${e.message}\n`));
       this.emit('exit', 1);
@@ -182,6 +189,19 @@ class LocalStream extends EventEmitter {
       this.emit('exit', c);
       this.emit('close', c, signal);
     });
+  }
+  // Only commands started with { stdin: true } have a stdin to write to (large uploads).
+  write(chunk) {
+    return this.child.stdin ? this.child.stdin.write(chunk) : true;
+  }
+  end() {
+    if (this.child.stdin) this.child.stdin.end();
+  }
+  pause() {
+    this.child.stdout.pause();
+  }
+  resume() {
+    this.child.stdout.resume();
   }
   close() {
     // Kill the whole process group (e.g. both halves of `tail -F … | grep`).
@@ -204,9 +224,13 @@ class LocalClient extends EventEmitter {
     setImmediate(() => this.emit('ready'));
     return this;
   }
-  exec(command, cb) {
+  exec(command, opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     try {
-      const child = spawn('/bin/bash', ['-c', command], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn('/bin/bash', ['-c', command], { detached: true, stdio: [opts && opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
       const stream = new LocalStream(child);
       this.streams.add(stream);
       stream.on('close', () => this.streams.delete(stream));
@@ -924,6 +948,330 @@ app.patch('/api/instances/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Migration to a new VPS (API: /api/migration/*) ----
+//
+// Export: on the old VPS everything that makes a world (saves, LinuxGSM config, BepInEx mods and configs)
+// is packed into a staging folder under /var/tmp/vgui-migration, then the finished bundle is streamed
+// through this GUI to a file on your PC. Import: after the new VPS has been through Setup, the bundle is
+// uploaded to it, every part is checked against its checksum, and each world is unpacked. Anything the
+// import replaces is moved to ~/pre-migration-<time> in that world's home, never deleted. The bundle holds
+// the server password and Mods.yaml, so treat the file like a password. See migration.js for the format.
+const migTs = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+
+// Stream a command's raw stdout into an HTTP response (binary-safe, with backpressure).
+function sshBinaryOut(command, res, onDone) {
+  const conn = new Client();
+  let done = false;
+  const finish = (err) => {
+    if (done) return;
+    done = true;
+    try {
+      conn.end();
+    } catch (e) {}
+    if (err && !res.headersSent) res.status(500).json({ error: err });
+    else if (err) res.destroy(new Error(err));
+    else res.end();
+    if (onDone) onDone(err);
+  };
+  conn
+    .on('ready', () => {
+      conn.exec(command, (err, stream) => {
+        if (err) return finish(err.message);
+        let stderr = '';
+        res.on('close', () => {
+          if (!done) {
+            try {
+              stream.close();
+            } catch (e) {}
+            finish('download cancelled');
+          }
+        });
+        stream.on('data', (d) => {
+          if (!res.write(d)) {
+            stream.pause();
+            res.once('drain', () => stream.resume());
+          }
+        });
+        stream.stderr.on('data', (d) => (stderr += d.toString()));
+        stream.on('close', (code) => finish(code === 0 || code === 1 || code === undefined || code === null ? null : `the VPS command failed (${code}): ${stderr.trim().slice(0, 300)}`));
+      });
+    })
+    .on('error', (e) => finish(e.message))
+    .connect(sshConnectOpts());
+}
+
+// Pipe a readable (the upload request) into a command's stdin; resolves { code, stderr, bytes }.
+function sshStdinIn(command, readable) {
+  return new Promise((resolve) => {
+    const conn = new Client();
+    let settled = false;
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      try {
+        conn.end();
+      } catch (e) {}
+      resolve(r);
+    };
+    conn
+      .on('ready', () => {
+        conn.exec(command, { stdin: true }, (err, stream) => {
+          if (err) return done({ code: 1, stderr: err.message, bytes: 0 });
+          let stderr = '';
+          let bytes = 0;
+          stream.stderr.on('data', (d) => (stderr += d.toString()));
+          stream.on('data', () => {}); // keep the channel flowing
+          stream.on('close', (code) => done({ code: code == null ? 1 : code, stderr, bytes }));
+          readable.on('data', (chunk) => {
+            bytes += chunk.length;
+            if (!stream.write(chunk)) {
+              readable.pause();
+              stream.once('drain', () => readable.resume());
+            }
+          });
+          readable.on('end', () => stream.end());
+          readable.on('error', () => {
+            try {
+              stream.close();
+            } catch (e) {}
+          });
+          readable.on('aborted', () => {
+            try {
+              stream.close();
+            } catch (e) {}
+          });
+        });
+      })
+      .on('error', (e) => done({ code: 1, stderr: e.message, bytes: 0 }))
+      .connect(sshConnectOpts());
+  });
+}
+
+// What the scripts need to know about one world, taken from the config the GUI already derives.
+function migWorldSpec(id) {
+  return inWorld(id, async () => {
+    const reg = readRegistry().find((i) => i.id === id);
+    return migration.checkSpec({
+      id,
+      label: config.instance.label,
+      user: config.lgsmUser,
+      lgsmServer: config.lgsmServer,
+      home: config.lgsmHome,
+      listDir: config.paths.listDir,
+      serverDir: config.paths.valheimServerDir,
+      cfgDir: path.posix.dirname(config.paths.commonCfgPath),
+      plannedPort: reg && reg.plannedPort ? reg.plannedPort : null,
+    });
+  });
+}
+
+async function migPreview(ids) {
+  const specs = [];
+  const errors = {};
+  for (const id of ids) {
+    try {
+      specs.push(await migWorldSpec(id));
+    } catch (e) {
+      errors[id] = e.message;
+    }
+  }
+  const out = { freeMB: null, worlds: [], errors };
+  if (!specs.length) return out;
+  const r = await sshExec(asRootScript(migration.previewScript(specs)));
+  out.freeMB = Math.round(Number((/FREE_KB:(\d+)/.exec(r.stdout) || [])[1] || 0) / 1024);
+  for (const line of r.stdout.split('\n')) {
+    const m = /^W\|([a-z0-9]+)\|([01])\|(\d+)\|(\d+)\|(\d+)\|(\d+)\|([01])\|([01])\|(.*)$/.exec(line.trim());
+    if (!m) continue;
+    const spec = specs.find((x) => x.id === m[1]);
+    out.worlds.push({
+      id: m[1],
+      label: spec ? spec.label : m[1],
+      account: spec ? spec.user : null,
+      accountExists: m[2] === '1',
+      running: Number(m[3]) > 0,
+      savesKB: Number(m[4]),
+      modsKB: Number(m[5]),
+      extrasKB: Number(m[6]),
+      hasLgsmConfig: m[7] === '1',
+      bepinexInstalled: m[8] === '1',
+      worlds: m[9] ? m[9].split(',') : [],
+    });
+  }
+  return out;
+}
+
+app.get('/api/migration/preview', async (req, res) => {
+  try {
+    res.json({ ...(await migPreview(worldList())), host: LOCAL_MODE ? 'this machine' : `${config.ssh.username}@${config.ssh.host}` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Build the bundle on this VPS (streams progress; ends with "EXPORT_READY <token> <bytes>").
+app.post('/api/migration/export', async (req, res) => {
+  const b = req.body || {};
+  const ids = Array.isArray(b.worlds) ? b.worlds.map(String) : [];
+  const all = worldList();
+  if (!ids.length || ids.some((i) => !all.includes(i)) || new Set(ids).size !== ids.length) return res.status(400).json({ error: 'Choose at least one of your worlds.' });
+  if (!b.saves && !b.mods) return res.status(400).json({ error: 'Choose what to include: saves, mods, or both.' });
+  try {
+    const specs = [];
+    for (const id of ids) specs.push(await migWorldSpec(id));
+    const token = migTs();
+    const manifest = migration.buildManifest({ guiVersion: require('./package.json').version, includes: { saves: !!b.saves, mods: !!b.mods }, worlds: specs });
+    const script = migration.exportScript({ token, worlds: specs, saves: !!b.saves, mods: !!b.mods, allowRunning: b.allowRunning === true, manifestJson: JSON.stringify(manifest, null, 2) });
+    sshExecPlainStream(asRootScript(script), res);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/migration/download/:token', async (req, res) => {
+  const token = req.params.token;
+  if (!migration.TOKEN_RE.test(token)) return res.status(400).json({ error: 'Bad bundle id.' });
+  try {
+    const chk = await sshExec(maybeSudo(`test -f ${shq(`${migration.STAGE_ROOT}/export-${token}/manifest.json`)}`) + ' && echo OK');
+    if (!chk.stdout.includes('OK')) return res.status(404).json({ error: 'That bundle no longer exists on the VPS. Export again.' });
+    res.writeHead(200, { 'Content-Type': 'application/x-tar', 'Content-Disposition': `attachment; filename="valheim-migration-${token}.tar"`, 'Cache-Control': 'no-store' });
+    sshBinaryOut(maybeSudo(migration.downloadCommand(token)), res);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// Remove a staged export or import (only folders this feature created, named by a 14-digit time stamp).
+app.delete('/api/migration/:kind/:token', async (req, res) => {
+  const { kind, token } = req.params;
+  if (!['export', 'import'].includes(kind) || !migration.TOKEN_RE.test(token)) return res.status(400).json({ error: 'Bad request.' });
+  try {
+    await sshExec(maybeSudo(`rm -rf ${shq(`${migration.STAGE_ROOT}/${kind}-${token}`)}`));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Receive the bundle (raw request body) and write it to the VPS this GUI is connected to.
+app.post('/api/migration/upload', async (req, res) => {
+  const expected = Number(req.get('x-bundle-size') || 0);
+  const token = migTs();
+  const dir = `${migration.STAGE_ROOT}/import-${token}`;
+  try {
+    const prep = await sshExec(
+      asRootScript(
+        [`ROOT=${shq(migration.STAGE_ROOT)}`, 'mkdir -p "$ROOT" && chmod 700 "$ROOT"', 'for old in "$ROOT"/import-*; do [ -d "$old" ] && rm -rf "$old"; done', `mkdir -p ${shq(dir)} && chmod 700 ${shq(dir)} && echo READY`].join('\n')
+      )
+    );
+    if (!prep.stdout.includes('READY')) return res.status(500).json({ error: `Could not prepare ${migration.STAGE_ROOT} on the VPS: ${prep.stderr.trim()}` });
+    const file = `${dir}/bundle.tar`;
+    const r = await sshStdinIn(`${maybeSudo(`tee ${shq(file)}`)} >/dev/null`, req);
+    if (r.code !== 0) return res.status(500).json({ error: `The upload to the VPS failed: ${r.stderr.trim() || `exit ${r.code}`}` });
+    const size = Number(((await sshExec(maybeSudo(`stat -c %s ${shq(file)}`))).stdout || '').trim());
+    if (expected && size !== expected) {
+      await sshExec(maybeSudo(`rm -rf ${shq(dir)}`));
+      return res.status(400).json({ error: `Only ${size} of ${expected} bytes arrived. The upload was cut short, try again.` });
+    }
+    res.json({ ok: true, token, bytes: size });
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// What an uploaded bundle holds and what each of its worlds would be unpacked into on this VPS.
+app.get('/api/migration/inspect/:token', async (req, res) => {
+  const token = req.params.token;
+  if (!migration.TOKEN_RE.test(token)) return res.status(400).json({ error: 'Bad bundle id.' });
+  try {
+    const mf = await sshExec(maybeSudo(migration.readBundleCommand(token, 'manifest.json')));
+    const parsed = migration.parseManifest(mf.stdout);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const partsOut = await sshExec(maybeSudo(migration.listPartsCommand(token)));
+    const parts = {};
+    for (const line of partsOut.stdout.split('\n')) {
+      const m = /^worlds\/([a-z0-9]+)\/(saves|lgsm|bepinex|extras)\.tgz$/.exec(line.trim());
+      if (m) (parts[m[1]] = parts[m[1]] || []).push(`${m[2]}.tgz`);
+    }
+    const inRegistry = new Set(worldList());
+    const present = parsed.manifest.worlds.filter((w) => inRegistry.has(w.id)).map((w) => w.id);
+    const preview = await migPreview(present);
+    const targets = parsed.manifest.worlds.map((w) => {
+      const p = preview.worlds.find((x) => x.id === w.id) || null;
+      return { ...w, parts: parts[w.id] || [], known: inRegistry.has(w.id), target: p, targetError: preview.errors[w.id] || null };
+    });
+    res.json({ token, manifest: { createdAt: parsed.manifest.createdAt, guiVersion: parsed.manifest.guiVersion, includes: parsed.manifest.includes }, targets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/migration/verify/:token', (req, res) => {
+  const token = req.params.token;
+  if (!migration.TOKEN_RE.test(token)) return res.status(400).json({ error: 'Bad bundle id.' });
+  sshExecPlainStream(asRootScript(migration.verifyScript(token)), res);
+});
+
+// Worlds that exist in the bundle but not in this GUI's list get an entry with the same id (so the game
+// account name is the same); their VPS setup still has to be run from Setup.
+app.post('/api/migration/prepare', async (req, res) => {
+  const token = String((req.body && req.body.token) || '');
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
+  if (!migration.TOKEN_RE.test(token)) return res.status(400).json({ error: 'Bad bundle id.' });
+  try {
+    const parsed = migration.parseManifest((await sshExec(maybeSudo(migration.readBundleCommand(token, 'manifest.json')))).stdout);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const reg = readRegistry();
+    const created = [];
+    for (const id of ids) {
+      const w = parsed.manifest.worlds.find((x) => x.id === id);
+      if (!w || id === 'main' || reg.some((i) => i.id === id)) continue;
+      if (reg.length >= 8) return res.status(400).json({ error: 'The GUI manages at most 8 extra worlds.' });
+      let label = w.label;
+      for (let n = 2; reg.some((i) => i.label.toLowerCase() === label.toLowerCase()); n++) label = `${w.label.slice(0, 27)} ${n}`;
+      const mainPort = (await inWorld('main', () => getWorldInfo())).port || 2456;
+      const used = new Set([mainPort, ...reg.map((i) => i.plannedPort).filter(Boolean)]);
+      let plannedPort = w.plannedPort || mainPort + 10;
+      while ([...used].some((p) => portsOverlap(p, plannedPort))) plannedPort += 10;
+      const entry = { id, label, lgsmUser: `vhserver-${id}`, lgsmServer: w.lgsmServer || 'vhserver', plannedPort, created: new Date().toISOString() };
+      reg.push(entry);
+      created.push(entry);
+    }
+    if (created.length) {
+      writeRegistry(reg);
+      syncBotWorlds().catch(() => {});
+    }
+    res.json({ ok: true, created });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Unpack one world from an uploaded bundle (streams progress; the last lines say IMPORTED, [collision],
+// [running] or [error]).
+app.post('/api/migration/import', async (req, res) => {
+  const b = req.body || {};
+  const token = String(b.token || '');
+  const id = String(b.id || '');
+  if (!migration.TOKEN_RE.test(token) || !worldList().includes(id)) return res.status(400).json({ error: 'Unknown bundle or world.' });
+  if (!b.saves && !b.mods) return res.status(400).json({ error: 'Choose what to import: saves, mods, or both.' });
+  try {
+    const parsed = migration.parseManifest((await sshExec(maybeSudo(migration.readBundleCommand(token, 'manifest.json')))).stdout);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const mw = parsed.manifest.worlds.find((x) => x.id === id);
+    if (!mw) return res.status(400).json({ error: `The bundle has no world "${id}".` });
+    const parts = (await sshExec(maybeSudo(migration.listPartsCommand(token)))).stdout
+      .split('\n')
+      .map((l) => /^worlds\/([a-z0-9]+)\/((?:saves|lgsm|bepinex|extras)\.tgz)$/.exec(l.trim()))
+      .filter((m) => m && m[1] === id)
+      .map((m) => m[2]);
+    const w = await migWorldSpec(id);
+    const script = migration.importScript({ token, w, parts, oldHome: mw.home, overwrite: b.overwrite === true, doSaves: !!b.saves, doMods: !!b.mods, ts: migTs() });
+    sshExecPlainStream(asRootScript(script), res);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ---- Firewall (ufw) ----
 //
 // A Valheim world needs UDP <port> to <port>+2 open. When the VPS runs ufw AND it is active, the GUI
@@ -1465,7 +1813,9 @@ app.get('/api/backup/run', (req, res) => {
 
 app.get('/api/backup/list', async (req, res) => {
   try {
-    const r = await sshExec(`ls -1t ${shq(config.paths.backupDir)} 2>/dev/null | head -50`);
+    // Each backup also leaves a <name>-plugins.txt next to it (the mod list at that moment). Text files are
+    // records, not something to restore, so they are left out of this list and do not use up the 50 slots.
+    const r = await sshExec(`ls -1t ${shq(config.paths.backupDir)} 2>/dev/null | grep -v -e '\\.txt$' | head -50`);
     res.json({ files: r.stdout.split('\n').filter(Boolean) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -4162,11 +4512,262 @@ app.get('/api/mods/dependencies', async (req, res) => {
   }
 });
 
+// Resolves the full dependency chain of one package (transitively, dependencies first), reporting
+// which of them the plugins folder already has. Used by the install prompt and by Setup (Enforcer).
+async function resolveDependencyPlan(src, owner, name, version, haveFolders) {
+  const have = haveFolders.map(normalize);
+  const isInstalled = (n) => {
+    const x = normalize(n);
+    return have.some((f) => f === x || f.includes(x));
+  };
+  const ordered = [];
+  const seen = new Set();
+  const visit = async (s, o, n, v, depth) => {
+    if (depth > 6) return;
+    let pkgs;
+    try {
+      pkgs = await getPackages(s);
+    } catch (e) {
+      return;
+    }
+    const hit = pkgs.find((p) => p.owner === o && p.name === n);
+    const ver = hit && (hit.versions.find((x) => x.version_number === v) || hit.versions[0]);
+    for (const depStr of (ver && ver.dependencies) || []) {
+      const d = parseDependencyString(depStr);
+      if (/bepinexpack/i.test(d.name)) continue;
+      const key = normalize(`${d.owner}-${d.name}`);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const latest = await findLatestPackage(d.owner, d.name);
+      if (!latest) {
+        ordered.push({ owner: d.owner, name: d.name, version: d.version, source: null, missing: true, installed: isInstalled(d.name) });
+        continue;
+      }
+      await visit(latest.source, latest.owner, latest.name, latest.version, depth + 1);
+      ordered.push({ ...latest, installed: isInstalled(latest.name) });
+    }
+  };
+  await visit(src, owner, name, version, 0);
+  return ordered;
+}
+
+// What installing this package would also need: every dependency, dependencies first.
+app.get('/api/mods/dependency-plan', async (req, res) => {
+  const { namespace, name, version, source } = req.query;
+  if (!namespace || !name || !version) return res.status(400).json({ error: 'missing fields' });
+  try {
+    const lsr = await sshExec(`ls -1 ${shq(config.paths.pluginsDir)} 2>/dev/null`);
+    const have = lsr.stdout.split('\n').filter(Boolean);
+    const dependencies = await resolveDependencyPlan(source === 'hexium' ? 'hexium' : 'thunderstore', namespace, name, version, have);
+    res.json({ dependencies });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Mod snapshots (Mods > History) ----
+// Before any install, update or removal the GUI saves the list of installed mods (folder, package,
+// version, source) as a small JSON file next to the world's other files, so a bad update can be undone.
+// The nightly backup also writes the same list (<world>-<date>-mods.txt), so older states can be
+// restored from backups too. Restoring never touches mod configs or the world; it only reinstalls or
+// removes mod folders, and the user confirms a plan first.
+const SNAP_ID_RE = /^\d{8}-\d{6}$/;
+const BACKUP_MODS_RE = /^[A-Za-z0-9_.-]+-mods\.txt$/;
+const SNAP_KEEP = 30;
+const SNAP_MIN_GAP_MS = 90 * 1000;
+const snapDir = () => `${config.lgsmHome}/mod-snapshots`;
+
+async function captureModSet() {
+  const [lsr, recs] = await Promise.all([
+    sshExec(`ls -1 ${shq(config.paths.pluginsDir)} 2>/dev/null`),
+    loadInstalledFrom().catch(() => ({})),
+  ]);
+  return modsets.entriesFromFolders(lsr.stdout.split('\n').filter(Boolean), recs);
+}
+
+// Reads files that a loop printed as "@@@<header>\n<content>" blocks.
+function parseBlocks(stdout) {
+  return stdout
+    .split('@@@')
+    .slice(1)
+    .map((chunk) => {
+      const nl = chunk.indexOf('\n');
+      return { header: chunk.slice(0, nl).trim(), body: chunk.slice(nl + 1).trim() };
+    });
+}
+
+async function readSnapshots() {
+  const d = snapDir();
+  const r = await sshExec(
+    `d=${shq(d)}; [ -d "$d" ] && for f in $(ls -1 "$d" | grep -E '^[0-9]{8}-[0-9]{6}\\.json$' | sort -r); do echo "@@@$f"; cat "$d/$f"; echo; done; true`
+  );
+  const out = [];
+  for (const b of parseBlocks(r.stdout)) {
+    try {
+      const j = JSON.parse(b.body);
+      if (j && SNAP_ID_RE.test(j.id) && Array.isArray(j.mods)) out.push(j);
+    } catch (e) {}
+  }
+  return out;
+}
+
+// Best-effort: a failure here must never block the install/remove it protects.
+async function takeModSnapshot(reason, { force = false } = {}) {
+  try {
+    const mods = await captureModSet();
+    if (!force && !mods.length) return null;
+    const existing = await readSnapshots();
+    const latest = existing[0];
+    const now = new Date();
+    if (!force && latest) {
+      if (modsets.sameSet(latest.mods, mods)) return null;
+      if (now.getTime() - latest.ts < SNAP_MIN_GAP_MS) return null;
+    }
+    const id = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '').replace('T', '-');
+    const snap = { id, ts: now.getTime(), reason: String(reason || 'snapshot').slice(0, 200), mods };
+    const user = config.lgsmUser || 'vhserver';
+    const d = snapDir();
+    const script = [
+      'set -e',
+      `d=${shq(d)}`,
+      'mkdir -p "$d"',
+      `printf '%s' ${shq(Buffer.from(JSON.stringify(snap), 'utf8').toString('base64'))} | base64 -d > "$d/${id}.json"`,
+      `chown -R ${shq(`${user}:${user}`)} "$d" 2>/dev/null || true`,
+      `ls -1 "$d" | grep -E '^[0-9]{8}-[0-9]{6}\\.json$' | sort | head -n -${SNAP_KEEP} | while read f; do rm -f "$d/$f"; done`,
+      'echo SNAPSHOT_OK',
+    ].join('\n');
+    const r = await sshExec(asRootScript(script));
+    return r.stdout.includes('SNAPSHOT_OK') ? snap : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function readBackupModSets() {
+  const d = config.paths.backupDir;
+  if (!d) return [];
+  const r = await sshExec(
+    `cd ${shq(d)} 2>/dev/null && for f in $(ls -1t | grep -E -- '-mods\\.txt$' | head -30); do echo "@@@$f $(stat -c %Y "$f")"; cat "$f"; echo; done; true`
+  );
+  const out = [];
+  for (const b of parseBlocks(r.stdout)) {
+    const [file, mtime] = b.header.split(' ');
+    if (!BACKUP_MODS_RE.test(file || '')) continue;
+    try {
+      const j = JSON.parse(b.body);
+      if (j && Array.isArray(j.folders)) out.push({ file, ts: (parseInt(mtime, 10) || 0) * 1000, mods: modsets.entriesFromFolders(j.folders, j.installedFrom || {}) });
+    } catch (e) {}
+  }
+  return out;
+}
+
+async function loadHistoryTarget(id) {
+  if (id.startsWith('snap:')) {
+    const sid = id.slice(5);
+    if (!SNAP_ID_RE.test(sid)) return null;
+    const s = (await readSnapshots()).find((x) => x.id === sid);
+    return s ? { label: s.reason, ts: s.ts, mods: s.mods } : null;
+  }
+  if (id.startsWith('backup:')) {
+    const file = id.slice(7);
+    if (!BACKUP_MODS_RE.test(file)) return null;
+    const b = (await readBackupModSets()).find((x) => x.file === file);
+    return b ? { label: `Backup ${file.replace(/-mods\.txt$/, '')}`, ts: b.ts, mods: b.mods } : null;
+  }
+  return null;
+}
+
+app.get('/api/mods/history', async (req, res) => {
+  try {
+    const [snaps, backups] = await Promise.all([readSnapshots(), readBackupModSets().catch(() => [])]);
+    const items = [
+      ...snaps.map((s) => ({ id: `snap:${s.id}`, kind: 'snapshot', ts: s.ts, reason: s.reason, count: s.mods.length })),
+      ...backups.map((b) => ({ id: `backup:${b.file}`, kind: 'backup', ts: b.ts, reason: `Nightly backup ${b.file.replace(/-mods\.txt$/, '')}`, count: b.mods.length })),
+    ].sort((a, b) => b.ts - a.ts);
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/mods/snapshot', async (req, res) => {
+  const reason = String((req.body && req.body.reason) || 'Saved manually').slice(0, 200);
+  const snap = await takeModSnapshot(reason, { force: true });
+  if (!snap) return res.status(500).json({ error: 'Could not save the snapshot (check the plugins folder path and the game account).' });
+  res.json({ ok: true, id: `snap:${snap.id}`, count: snap.mods.length });
+});
+
+// What getting from the installed mods to a saved set would involve, with packages looked up so the
+// client can install them straight away. ?id=snap:<id> or backup:<file>
+app.get('/api/mods/restore-plan', async (req, res) => {
+  const id = String(req.query.id || '');
+  try {
+    const target = await loadHistoryTarget(id);
+    if (!target) return res.status(404).json({ error: 'That snapshot no longer exists.' });
+    const [current, thunderstore, hexium, enforcerCfg, overridesByGuid, dllsByFolder] = await Promise.all([
+      captureModSet(),
+      getThunderstorePackages().catch(() => []),
+      getHexiumPackages().catch(() => []),
+      loadEnforcerConfig().catch(() => null),
+      loadOverrides().catch(() => ({})),
+      loadDllsByFolder().catch(() => ({})),
+    ]);
+    const lists = { thunderstore, hexium };
+    const checked = thunderstore.length + hexium.length > 0;
+    const find = (src, owner, name) => (lists[src] || []).find((p) => modgraph.norm(p.owner) === modgraph.norm(owner) && modgraph.norm(p.name) === modgraph.norm(name));
+    const plan = modsets.planRestore(current, target.mods);
+    const lines = plan.lines.map((l) => {
+      if (l.action === 'manual') return { ...l, note: 'Hand-named folder, so it cannot be reinstalled from here.' };
+      if (l.action === 'remove') {
+        const { status } = classifyMod(l.folder, enforcerCfg, overridesByGuid, dllsByFolder[l.folder] || []);
+        return { ...l, status, protected: status === 'required' || status === 'adminOnly' };
+      }
+      if (!checked) return { ...l, source: l.source || 'thunderstore', unchecked: true };
+      const order = l.source === 'hexium' ? ['hexium', 'thunderstore'] : ['thunderstore', 'hexium'];
+      let pkgFound = null;
+      for (const src of order) {
+        const p = find(src, l.owner, l.name);
+        if (!p) continue;
+        pkgFound = { src, p };
+        if ((p.versions || []).some((v) => v.version_number === l.version)) return { ...l, source: src, owner: p.owner, name: p.name };
+      }
+      return { ...l, action: 'manual', note: pkgFound ? `Version ${l.version} is no longer published.` : 'Not found on Thunderstore or Hexium.' };
+    });
+    res.json({ label: target.label, ts: target.ts, lines, unchanged: plan.unchanged, checked });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// What removing these installed mods would affect: other installed mods that need them, and the
+// libraries they need (with who else still needs each). ?names=A,B
+app.get('/api/mods/remove-plan', async (req, res) => {
+  const names = String(req.query.names || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (!names.length) return res.status(400).json({ error: 'missing names' });
+  try {
+    const [lsr, recs, thunderstore, hexium] = await Promise.all([
+      sshExec(`ls -1 ${shq(config.paths.pluginsDir)} 2>/dev/null`),
+      loadInstalledFrom().catch(() => ({})),
+      getThunderstorePackages().catch(() => []),
+      getHexiumPackages().catch(() => []),
+    ]);
+    const folders = lsr.stdout.split('\n').filter(Boolean);
+    const nodes = modgraph.buildGraph(folders, recs, { thunderstore, hexium });
+    res.json({ ...modgraph.planRemoval(nodes, names.filter((n) => folders.includes(n))), checked: thunderstore.length + hexium.length > 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/mods/install', async (req, res) => {
   const { namespace, name, version, packageName, source } = req.body;
   if (!namespace || !name || !version) return res.status(400).json({ error: 'missing fields' });
   const src = source === 'hexium' ? 'hexium' : 'thunderstore';
   const sourceLabel = src === 'hexium' ? 'Hexium' : 'Thunderstore';
+  await takeModSnapshot(`Before installing ${namespace}-${packageName || name} ${version}`);
   // `name` is the LOCAL FOLDER to write into (preserved as-is so updating a
   // mod overwrites its existing folder, whatever it's called). `packageName`
   // is the actual package slug for the download URL — these can differ,
@@ -4356,6 +4957,7 @@ app.post('/api/mods/remove', async (req, res) => {
     return;
   }
 
+  await takeModSnapshot(`Before removing ${name}`);
   const warn = blocked ? `echo "[WARNING] removed a ${status} mod despite the enforcer check" && ` : '';
   const removeFolderCmd = `rm -rf ${shq(config.paths.pluginsDir)}/${shq(name)} && echo REMOVED ${name}`;
 
@@ -5392,29 +5994,7 @@ app.get('/api/setup/enforcer-version', async (req, res) => {
     // com.jotunn.jotunn"), so resolve the chain here and report only what the
     // plugins folder doesn't already contain, dependencies first.
     const lsr = await sshExec(`ls -1 ${shq(config.paths.pluginsDir)} 2>/dev/null`);
-    const have = lsr.stdout.split('\n').filter(Boolean).map(normalize);
-    const isInstalled = (name) => { const n = normalize(name); return have.some((f) => f === n || f.includes(n)); };
-    const ordered = [];
-    const seen = new Set();
-    const visit = async (src, owner, name, version, depth) => {
-      if (depth > 4) return;
-      let pkgs;
-      try { pkgs = await getPackages(src); } catch (e) { return; }
-      const hit = pkgs.find((p) => p.owner === owner && p.name === name);
-      const ver = hit && (hit.versions.find((v) => v.version_number === version) || hit.versions[0]);
-      for (const depStr of (ver && ver.dependencies) || []) {
-        const d = parseDependencyString(depStr);
-        if (/bepinexpack/i.test(d.name)) continue;
-        const key = normalize(`${d.owner}-${d.name}`);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const latest = await findLatestPackage(d.owner, d.name);
-        if (!latest) { ordered.push({ owner: d.owner, name: d.name, version: d.version, source: null, missing: true, installed: isInstalled(d.name) }); continue; }
-        await visit(latest.source, latest.owner, latest.name, latest.version, depth + 1);
-        ordered.push({ ...latest, installed: isInstalled(latest.name) });
-      }
-    };
-    await visit(pkg.source, pkg.owner, pkg.name, pkg.version, 0);
+    const ordered = await resolveDependencyPlan(pkg.source, pkg.owner, pkg.name, pkg.version, lsr.stdout.split('\n').filter(Boolean));
     res.json({ ...pkg, dependencies: ordered });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -5879,7 +6459,7 @@ app.get('/api/pz/backup/run', (req, res) => {
 app.get('/api/pz/backup/list', async (req, res) => {
   if (!requirePz(req, res)) return;
   try {
-    const r = await sshExec(`ls -1t ${shq(PZ.backupDir)} 2>/dev/null | head -50`);
+    const r = await sshExec(`ls -1t ${shq(PZ.backupDir)} 2>/dev/null | grep -v -e '\\.txt$' | head -50`);
     res.json({ files: r.stdout.split('\n').filter(Boolean) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -5977,7 +6557,7 @@ const PORT = config.guiPort || 4173;
 // tunnel or Tailscale Serve (see deploy/README-DEPLOY.md) — both forward to
 // this localhost port without exposing it to the internet.
 const BIND_HOST = config.bindHost || '127.0.0.1';
-app.listen(PORT, BIND_HOST, () => {
+const httpServer = app.listen(PORT, BIND_HOST, () => {
   serving = true;
   console.log(`Valheim GUI running at http://${BIND_HOST === '127.0.0.1' ? 'localhost' : BIND_HOST}:${PORT} (mode: ${LOCAL_MODE ? 'local, on this machine' : 'ssh → ' + config.ssh.host})`);
   // Warm the package-list caches and the shared SSH connection in the
@@ -5986,3 +6566,6 @@ app.listen(PORT, BIND_HOST, () => {
   getHexiumPackages().catch(() => {});
   getSharedConn().catch((e) => console.error('[ssh] initial connection failed:', e.message));
 });
+// A migration bundle can be several GB; the default 5 minute limit on receiving one request would cut the upload off.
+httpServer.requestTimeout = 0;
+httpServer.timeout = 0;

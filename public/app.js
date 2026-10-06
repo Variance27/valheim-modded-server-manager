@@ -577,6 +577,7 @@ const PAGES = {
   updates: 'Updates',
   logs: 'Logs',
   setup: 'Setup',
+  migration: 'Migration',
   settings: 'Settings',
   configs: 'Mod configs',
   'pz-dashboard': 'Dashboard',
@@ -666,6 +667,7 @@ function showPage(page, { focus = false } = {}) {
       loadBot();
     }
     if (page === 'configs') loadConfigList();
+    if (page === 'migration') loadMigration();
     if (page === 'pz-backups') pzListBackups();
     if (page === 'pz-mods') pzLoadMods();
   }
@@ -1464,6 +1466,7 @@ function showModsTab(tab) {
   });
   qsa('.subpanel').forEach((p) => p.classList.toggle('active', p.id === 'sub-' + tab));
   if (tab === 'requirements' && !requirementsLoaded) loadRequirements();
+  if (tab === 'history') loadHistory();
   if (tab === 'browse') renderSearchEmpty();
 }
 qsa('.subtab').forEach((b) => (b.onclick = () => showModsTab(b.dataset.subtab)));
@@ -2063,7 +2066,14 @@ async function bulkUpdateSelected() {
   });
   if (!ok) return;
 
-  out.textContent = `Updating ${targets.length} mod(s)...\n`;
+  const dep = await resolveUpdateDeps(targets.map((m) => ({ label: m.name, namespace: m.update.namespace, name: m.update.packageName, version: m.update.latestVersion, source: m.update.source })));
+  if (!dep.proceed) return;
+  out.textContent = '';
+  if (!(await installUpdateDeps(out, dep.deps))) {
+    loadInstalledMods();
+    return;
+  }
+  out.textContent += `Updating ${targets.length} mod(s)...\n`;
   if (skipped.length) out.textContent += `Skipping (no update available): ${skipped.map((m) => m.name).join(', ')}\n`;
   for (const mod of targets) {
     out.textContent += `\n--- ${mod.name} → v${mod.update.latestVersion} (${sourceLabel(mod.update.source)}) ---\n`;
@@ -2088,8 +2098,13 @@ async function bulkUpdateSelected() {
 }
 
 async function bulkRemoveSelected() {
-  const targets = lastInstalledMods.filter((m) => selectedMods.has(m.name));
+  let targets = lastInstalledMods.filter((m) => selectedMods.has(m.name));
   if (!targets.length) return;
+  // Mods that need the selection (and libraries only it needs) are offered too, then handled like any other selected mod.
+  const related = await askRelatedRemoval(targets.map((m) => m.name));
+  if (!related) return;
+  [...related.dependents, ...related.libs].forEach((n) => selectedMods.add(n));
+  targets = lastInstalledMods.filter((m) => selectedMods.has(m.name));
   const blocked = targets.filter((m) => m.status === 'required' || m.status === 'adminOnly');
   const safe = targets.filter((m) => m.status !== 'required' && m.status !== 'adminOnly');
 
@@ -2198,7 +2213,14 @@ async function openUpdatePromptForMod(mod) {
     showCategory: false,
     warningHtml,
     onConfirm: async ({ source, namespace, name, version }) => {
-      out.textContent = `Updating ${mod.name} to v${version} from ${sourceLabel(source)} (${namespace})...\n`;
+      const dep = await resolveUpdateDeps([{ label: mod.name, namespace, name, version, source }]);
+      if (!dep.proceed) return;
+      out.textContent = '';
+      if (!(await installUpdateDeps(out, dep.deps))) {
+        loadInstalledMods();
+        return;
+      }
+      out.textContent += `Updating ${mod.name} to v${version} from ${sourceLabel(source)} (${namespace})...\n`;
       const result = await streamPost('/api/mods/install', { namespace, name: mod.name, packageName: name, version, source }, out);
       if (result.includes(`INSTALLED ${mod.name} ${version}`)) {
         logChange('update', mod.name, { version, source });
@@ -2243,7 +2265,14 @@ async function manualUpdateMod(mod) {
   if (!res || res.key !== 'install') return;
   const { source, namespace, packageName, version } = res.value;
   const out = $('mods-output');
-  out.textContent = `Manually installing ${namespace}-${packageName} v${version} from ${sourceLabel(source)} into ${mod.name}...\n`;
+  const dep = await resolveUpdateDeps([{ label: mod.name, namespace, name: packageName, version, source }]);
+  if (!dep.proceed) return;
+  out.textContent = '';
+  if (!(await installUpdateDeps(out, dep.deps))) {
+    loadInstalledMods();
+    return;
+  }
+  out.textContent += `Manually installing ${namespace}-${packageName} v${version} from ${sourceLabel(source)} into ${mod.name}...\n`;
   const result = await streamPost('/api/mods/install', { namespace, name: mod.name, packageName, version, source }, out);
   if (result.includes(`INSTALLED ${mod.name} ${version}`)) {
     logChange('update', mod.name, { version, source });
@@ -2356,25 +2385,122 @@ async function protectedDialog(verb, name, status, reason, consequence) {
   return !!(res && res.key === 'force');
 }
 
+// API: GET /api/mods/remove-plan — installed mods that need these, and libraries nothing else needs.
+async function fetchRemovalPlan(names) {
+  try {
+    return await api(`/api/mods/remove-plan?names=${encodeURIComponent(names.join(','))}`);
+  } catch (e) {
+    return null; // fail open: a broken check must not block removing a mod
+  }
+}
+
+function relatedRow(folder, note, checked) {
+  const m = lastInstalledMods.find((x) => x.name === folder);
+  const protectedMod = m && (m.status === 'required' || m.status === 'adminOnly');
+  return `<li><label class="dep-check"><input type="checkbox" value="${esc(folder)}" ${checked ? 'checked' : ''}> <span class="mono">${esc(folder)}</span>
+    ${protectedMod ? '<span class="badge warn">Required in ValheimEnforcer</span>' : ''}${note ? `<span class="dep-note">${note}</span>` : ''}</label></li>`;
+}
+function checkedValues(body) {
+  return qsa('input[type="checkbox"]:checked', body).map((c) => c.value);
+}
+
+// Asks about mods related to what is being removed. Resolves null if the user cancels, otherwise
+// { dependents: [folder, …], libs: [folder, …], asked: bool } — the other mods to remove as well.
+async function askRelatedRemoval(names) {
+  const label = names.length === 1 ? names[0] : pluralize(names.length, 'selected mod');
+  const plan = await fetchRemovalPlan(names);
+  if (!plan) return { dependents: [], libs: [], asked: false };
+  let extras = [];
+  let libs = [];
+  let asked = false;
+
+  if (plan.dependents.length) {
+    asked = true;
+    const res = await dialog({
+      title: 'Other mods need this',
+      tone: 'warn',
+      html: `<p>These installed mods depend on <strong>${esc(label)}</strong> and will probably stop working without it:</p>
+        <ul class="dialog-list dep-list">${plan.dependents.map((d) => relatedRow(d.folder, `needs ${esc(d.needs.join(', '))}`, false)).join('')}</ul>
+        <p>Tick any you want to remove as well, or remove only ${esc(label)}.</p>`,
+      actions: [
+        { key: 'only', label: `Remove only ${names.length === 1 ? 'this mod' : 'the selected'}`, variant: 'btn-secondary' },
+        { key: 'with', label: 'Remove ticked too', variant: 'btn-danger' },
+      ],
+      collect: (body, key) => {
+        if (key !== 'with') return [];
+        const v = checkedValues(body);
+        return v.length ? v : { error: 'Tick at least one mod, or choose “Remove only”.' };
+      },
+    });
+    if (!res) return null;
+    extras = res.key === 'with' ? res.value : [];
+  }
+
+  const all = [...names, ...extras];
+  const plan2 = extras.length ? await fetchRemovalPlan(all) : plan;
+  const deps = plan2 ? plan2.dependencies : [];
+  const orphans = deps.filter((d) => !d.neededBy.length);
+  const kept = deps.filter((d) => d.neededBy.length);
+  if (orphans.length) {
+    asked = true;
+    const res = await dialog({
+      title: 'Remove its libraries too?',
+      tone: 'info',
+      html: `<p>These installed mods are used by <strong>${esc(label)}</strong> and nothing else you have installed needs them:</p>
+        <ul class="dialog-list dep-list">${orphans.map((d) => relatedRow(d.folder, '', true)).join('')}</ul>
+        ${kept.length ? `<p class="muted">Kept because other mods use them: ${esc(kept.map((d) => d.folder).join(', '))}.</p>` : ''}
+        <p>Untick any you want to keep.</p>`,
+      actions: [
+        { key: 'only', label: 'Keep them', variant: 'btn-secondary' },
+        { key: 'with', label: 'Remove ticked too', variant: 'btn-danger' },
+      ],
+      collect: (body, key) => (key === 'with' ? checkedValues(body) : []),
+    });
+    if (!res) return null;
+    if (res.key === 'with') libs = res.value;
+  }
+  return { dependents: extras, libs, asked };
+}
+
 async function removeMod(name, status, reason) {
   const blocked = status === 'required' || status === 'adminOnly';
   if (blocked) {
     if (!(await protectedDialog('Remove', name, status, reason, "Removing it will lock players out until it's also removed from Mods.yaml."))) return;
-  } else if (
-    !(await confirmDialog({
-      title: `Remove ${name}?`,
-      tone: 'danger',
-      html: '<p>The mod folder is deleted from BepInEx/plugins. The server should be stopped first.</p>',
-      confirmLabel: 'Remove',
-    }))
-  ) {
-    return;
+  }
+  const related = await askRelatedRemoval([name]);
+  if (!related) return;
+  if (!blocked && !related.asked) {
+    if (
+      !(await confirmDialog({
+        title: `Remove ${name}?`,
+        tone: 'danger',
+        html: '<p>The mod folder is deleted from BepInEx/plugins. The server should be stopped first.</p>',
+        confirmLabel: 'Remove',
+      }))
+    ) {
+      return;
+    }
   }
   const out = $('mods-output');
-  out.textContent = `Removing ${name}...`;
-  const result = await streamPost('/api/mods/remove', { name, force: blocked }, out);
-  if (result.includes(`REMOVED ${name}`)) logChange('remove', name);
-  else toast('error', `Could not remove ${name}`, 'See the action log.');
+  out.textContent = '';
+  // Dependents go first so nothing is pulled out from under a mod that still needs it; libraries last.
+  const order = [...related.dependents, name, ...related.libs];
+  const removeOne = async (folder, force) => {
+    out.textContent += `${out.textContent ? '\n' : ''}Removing ${folder}...\n`;
+    const result = await streamPost('/api/mods/remove', { name: folder, force }, out);
+    if (result.includes(`REMOVED ${folder}`)) {
+      logChange('remove', folder);
+      return true;
+    }
+    toast('error', `Could not remove ${folder}`, 'See the action log.');
+    return false;
+  };
+  const statusOf = (f) => (lastInstalledMods.find((x) => x.name === f) || {}).status;
+  for (const f of order) {
+    const force = f === name ? blocked : ['required', 'adminOnly'].includes(statusOf(f));
+    const ok = await removeOne(f, force);
+    if (!ok && f === name) break; // the mod itself failed: leave its libraries alone
+  }
   loadInstalledMods();
 }
 
@@ -2686,60 +2812,551 @@ async function openInstallPromptFromSearch(mod, category) {
     defaultCategory: category || 'required',
     warningHtml: null,
     onConfirm: async ({ source, namespace, name, version, category }) => {
-      const missing = await checkMissingDependencies({ namespace, name, version, source });
-      if (missing.length) {
-        const ok = await confirmDialog({
-          title: 'Missing dependencies',
+      const plan = await fetchDependencyPlan({ namespace, name, version, source });
+      const todo = plan.filter((d) => !d.installed && !d.missing);
+      const unresolved = plan.filter((d) => !d.installed && d.missing);
+      let withDeps = [];
+      if (todo.length || unresolved.length) {
+        const res = await dialog({
+          title: 'This mod needs other mods',
           tone: 'warn',
-          html: `<p><strong>${esc(mod.name)}</strong> depends on mod(s) that aren't currently installed:</p>
-            <ul class="dialog-list">${missing.map((d) => `<li class="mono">${esc(d.owner)}-${esc(d.name)} (v${esc(d.version)})</li>`).join('')}</ul>
-            <p>It likely won't work correctly without them.</p>`,
-          confirmLabel: 'Install anyway',
+          html: `<p><strong>${esc(mod.name)}</strong> depends on mod(s) that aren't installed:</p>
+            ${todo.length ? `<ul class="dialog-list">${todo.map((d) => `<li class="mono">${esc(d.owner)}-${esc(d.name)} v${esc(d.version)} <span class="muted">(${esc(sourceLabel(d.source))})</span></li>`).join('')}</ul>` : ''}
+            ${unresolved.length ? `<p>Not found on Thunderstore or Hexium, so they can't be installed automatically:</p><ul class="dialog-list">${unresolved.map((d) => `<li class="mono">${esc(d.owner)}-${esc(d.name)}</li>`).join('')}</ul>` : ''}
+            <p>${todo.length ? 'Without them it likely won\'t load or work correctly.' : 'It likely won\'t work correctly without them.'}</p>`,
+          actions: [
+            { key: 'only', label: todo.length ? 'Install only this mod' : 'Install anyway', variant: 'btn-secondary' },
+            ...(todo.length ? [{ key: 'with', label: `Install with ${pluralize(todo.length, 'dependency', 'dependencies')}`, variant: 'btn-primary' }] : []),
+          ],
         });
-        if (!ok) return;
+        if (!res) return;
+        if (res.key === 'with') withDeps = todo;
       }
       if (currentModsTab !== 'browse') showModsTab('browse');
-      // Fresh installs get the full "Owner-PackageName-Version" folder name
-      // (Thunderstore/Gale's own convention, e.g.
-      // "denikson-BepInExPack_Valheim-5.4.2350") instead of the bare package
-      // name — keeps different versions distinguishable on disk. Updates
-      // deliberately keep reusing the mod's EXISTING folder name instead (see
-      // the /api/mods/install comment in server.js) — this only applies to a
-      // brand new install, never to updating something already installed.
-      const folderName = `${namespace}-${name}-${version}`;
-      out.textContent = `Installing ${mod.name} v${version} from ${sourceLabel(source)} (${namespace}) into ${folderName}...\n`;
-      const result = await streamPost('/api/mods/install', { namespace, name: folderName, packageName: name, version, source }, out);
-      if (result.includes(`INSTALLED ${folderName} ${version}`)) {
-        logChange('install', folderName, { version, source });
-      } else if (!result.includes('[error]')) {
-        out.textContent += '\n[finished — no success marker seen; check the output above for what happened]\n';
-      } else toast('error', `Install failed: ${mod.name}`, 'See the action log.');
-      if (category && category !== 'required') {
-        pendingCategorization[folderName] = category;
+      out.textContent = '';
+      // Dependencies first, so the mod never lands before what it needs. If one fails, stop there
+      // instead of leaving the mod half set up.
+      for (const d of withDeps) {
+        const r = await installPackage(out, { namespace: d.owner, name: d.name, version: d.version, source: d.source, category, label: `${d.name} (dependency)` });
+        if (!r.ok) {
+          out.textContent += `\n[error] dependency ${d.name} did not install — stopping, ${mod.name} was not installed.\n`;
+          toast('error', `Dependency failed: ${d.name}`, `${mod.name} was not installed. See the action log.`);
+          loadInstalledMods();
+          return;
+        }
+      }
+      const r = await installPackage(out, { namespace, name, version, source, category, label: mod.name });
+      if (r.ok && category && category !== 'required') {
         out.textContent +=
-          `\nInstalled. ValheimEnforcer needs the server stopped and started again to detect it and record its hash — ` +
-          `after stopping and starting the server, come back here and click "Apply: ${category}" next to it in Installed Mods.\n`;
-        toast('info', 'Stop/start needed to categorize', `After stopping and starting the server, click “Apply: ${bucketLabel[category]}” next to ${folderName}.`, 8000);
+          `\nInstalled. ValheimEnforcer needs the server stopped and started again to detect ${withDeps.length ? 'them' : 'it'} and record ${withDeps.length ? 'their hashes' : 'its hash'} — ` +
+          `after stopping and starting the server, come back here and click "Apply: ${category}" next to ${withDeps.length ? 'each' : 'it'} in Installed Mods.\n`;
+        toast('info', 'Stop/start needed to categorize', `After stopping and starting the server, click “Apply: ${bucketLabel[category]}” next to ${r.folderName}.`, 8000);
       }
       loadInstalledMods();
     },
   });
 }
 
+// Installs one package into its "Owner-PackageName-Version" folder (Thunderstore/Gale's own convention,
+// e.g. "denikson-BepInExPack_Valheim-5.4.2350") and streams the output. Fresh installs always get the
+// full name; updates deliberately keep reusing the mod's EXISTING folder name instead (see the
+// /api/mods/install comment in server.js).
+async function installPackage(out, { namespace, name, version, source, category, label }) {
+  const folderName = `${namespace}-${name}-${version}`;
+  out.textContent += `Installing ${label} v${version} from ${sourceLabel(source)} (${namespace}) into ${folderName}...\n`;
+  const result = await streamPost('/api/mods/install', { namespace, name: folderName, packageName: name, version, source }, out);
+  const ok = result.includes(`INSTALLED ${folderName} ${version}`);
+  if (ok) {
+    logChange('install', folderName, { version, source });
+  } else if (!result.includes('[error]')) {
+    out.textContent += '\n[finished — no success marker seen; check the output above for what happened]\n';
+  } else toast('error', `Install failed: ${label}`, 'See the action log.');
+  if (category && category !== 'required' && !result.includes('[error]')) pendingCategorization[folderName] = category;
+  return { ok, folderName };
+}
+
 // Mods tagged here at install time but not yet "required" show an Apply
 // button in the installed list once they exist there. Same-session only.
 const pendingCategorization = {};
 
-// API: GET /api/mods/dependencies
-async function checkMissingDependencies(mod) {
+// API: GET /api/mods/dependency-plan — every dependency of a package, dependencies first.
+async function fetchDependencyPlan(mod) {
   try {
     const r = await api(
-      `/api/mods/dependencies?namespace=${encodeURIComponent(mod.namespace)}&name=${encodeURIComponent(mod.name)}&version=${encodeURIComponent(mod.version)}&source=${encodeURIComponent(mod.source || 'thunderstore')}`
+      `/api/mods/dependency-plan?namespace=${encodeURIComponent(mod.namespace)}&name=${encodeURIComponent(mod.name)}&version=${encodeURIComponent(mod.version)}&source=${encodeURIComponent(mod.source || 'thunderstore')}`
     );
-    return (r.dependencies || []).filter((d) => !d.installed);
+    return r.dependencies || [];
   } catch (e) {
     return []; // fail open — a broken check shouldn't block installing
   }
+}
+
+// Before updating: does the new version need mods that aren't installed yet? items = [{label, namespace,
+// name, version, source}] (name = the package name). Returns { proceed, deps } - deps are the missing
+// ones the user chose to install along with the update (deduplicated, each remembering who needs it).
+async function resolveUpdateDeps(items) {
+  const plans = await Promise.all(items.map((it) => fetchDependencyPlan(it)));
+  const todo = new Map();
+  const unresolved = new Map();
+  plans.forEach((plan, i) => {
+    for (const d of plan) {
+      if (d.installed) continue;
+      const bucket = d.missing ? unresolved : todo;
+      const key = `${String(d.owner).toLowerCase()}/${String(d.name).toLowerCase()}`;
+      if (!bucket.has(key)) bucket.set(key, { ...d, needBy: [] });
+      bucket.get(key).needBy.push(items[i].label);
+    }
+  });
+  const need = [...todo.values()];
+  const cannot = [...unresolved.values()];
+  if (!need.length && !cannot.length) return { proceed: true, deps: [] };
+  const one = items.length === 1;
+  const li = (d, extra = '') =>
+    `<li><span class="mono">${esc(d.owner)}-${esc(d.name)}${d.version && !extra ? ` v${esc(d.version)}` : ''}</span> ${extra || `<span class="muted">${esc(sourceLabel(d.source))}${one ? '' : `, needed by ${esc(d.needBy.join(', '))}`}</span>`}</li>`;
+  const res = await dialog({
+    title: one ? 'The new version needs other mods' : 'These updates need other mods',
+    tone: 'warn',
+    html: `<p>${one ? `<strong>${esc(items[0].label)}</strong> v${esc(items[0].version)}` : 'The new versions'} depend${one ? 's' : ''} on mod(s) that aren't installed:</p>
+      ${need.length ? `<ul class="dialog-list">${need.map((d) => li(d)).join('')}</ul>` : ''}
+      ${cannot.length ? `<p>Not found on Thunderstore or Hexium, so they can't be installed automatically:</p><ul class="dialog-list">${cannot.map((d) => li(d, `<span class="muted">${one ? '' : `needed by ${esc(d.needBy.join(', '))}`}</span>`)).join('')}</ul>` : ''}
+      <p class="muted">Without them the updated mod${one ? '' : 's'} may fail to load.</p>`,
+    actions: [
+      { key: 'only', label: need.length ? 'Update only' : 'Update anyway', variant: 'btn-secondary' },
+      ...(need.length ? [{ key: 'with', label: `Update with ${pluralize(need.length, 'dependency', 'dependencies')}`, variant: 'btn-primary' }] : []),
+    ],
+  });
+  if (!res) return { proceed: false, deps: [] };
+  return { proceed: true, deps: res.key === 'with' ? need : [] };
+}
+
+// Installs dependencies one by one (no category - they're libraries); false means one failed and the
+// update should not go ahead.
+async function installUpdateDeps(out, deps) {
+  for (const d of deps) {
+    const r = await installPackage(out, { namespace: d.owner, name: d.name, version: d.version, source: d.source, label: `${d.name} (dependency)` });
+    if (!r.ok) {
+      out.textContent += `\n[error] dependency ${d.name} did not install - stopping before the update.\n`;
+      toast('error', `Dependency failed: ${d.name}`, 'The update was not applied. See the action log.');
+      return false;
+    }
+  }
+  return true;
+}
+
+// ---- Mod history: snapshots and rollback (API: /api/mods/history, /snapshot, /restore-plan) ----
+async function loadHistory() {
+  const list = $('history-list');
+  list.innerHTML = `<li class="empty-li">${emptyState({ iconName: 'clock', title: 'Loading…', small: true })}</li>`;
+  let items = [];
+  try {
+    items = (await api('/api/mods/history')).items || [];
+  } catch (e) {
+    list.innerHTML = `<li class="empty-li">${emptyState({ iconName: 'alert', title: 'Could not load the history', text: esc(e.message), small: true })}</li>`;
+    return;
+  }
+  if (!items.length) {
+    list.innerHTML = `<li class="empty-li">${emptyState({
+      iconName: 'clock',
+      title: 'No snapshots yet',
+      text: 'One is saved automatically the next time you install, update or remove a mod.',
+      action: `<button class="btn btn-primary btn-sm" onclick="saveSnapshot()">${icon('archive')}Save snapshot now</button>`,
+    })}</li>`;
+    return;
+  }
+  list.innerHTML = '';
+  items.forEach((it) => {
+    const li = document.createElement('li');
+    const when = it.ts ? `${new Date(it.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${timeAgo(it.ts)}` : 'Date unknown';
+    li.innerHTML = `<span class="row-icon">${icon(it.kind === 'backup' ? 'archive' : 'clock')}</span>
+      <div class="row-main"><div class="row-title"><span class="mod-name" style="font-size:13px">${esc(it.reason)}</span><span class="badge ${it.kind === 'backup' ? 'info' : ''}">${it.kind === 'backup' ? 'Backup' : 'Snapshot'}</span></div>
+      <div class="row-desc">${esc(when)} · ${pluralize(it.count, 'mod')}</div></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-warn btn-sm';
+    btn.innerHTML = `${icon('rotate')}Restore`;
+    btn.onclick = () => openRestore(it);
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+}
+
+async function saveSnapshot() {
+  try {
+    const r = await api('/api/mods/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Saved manually' }) });
+    toast('success', 'Snapshot saved', pluralize(r.count, 'mod'));
+    if (currentModsTab === 'history') loadHistory();
+  } catch (e) {
+    toast('error', 'Could not save the snapshot', e.message);
+  }
+}
+
+const RESTORE_LABEL = { downgrade: 'Go back to', upgrade: 'Update to', install: 'Reinstall', remove: 'Remove', manual: 'Cannot restore' };
+
+async function openRestore(item) {
+  let plan;
+  try {
+    plan = await api(`/api/mods/restore-plan?id=${encodeURIComponent(item.id)}`);
+  } catch (e) {
+    toast('error', 'Could not build the restore plan', e.message);
+    return;
+  }
+  const doable = plan.lines.filter((l) => l.action !== 'manual');
+  const manual = plan.lines.filter((l) => l.action === 'manual');
+  if (!doable.length) {
+    await dialog({
+      title: 'Nothing to restore',
+      tone: 'info',
+      html: `<p>The installed mods already match this ${item.kind === 'backup' ? 'backup' : 'snapshot'}${plan.unchanged ? ` (${pluralize(plan.unchanged, 'mod')} unchanged)` : ''}.</p>
+        ${manual.length ? `<p class="muted">Could not be restored automatically: ${esc(manual.map((l) => l.name || l.folder).join(', '))}.</p>` : ''}`,
+      actions: [],
+      cancelLabel: 'Close',
+    });
+    return;
+  }
+  const row = (l, i) => {
+    const what =
+      l.action === 'remove' ? `<span class="mono">${esc(l.folder)}</span>`
+        : l.action === 'install' ? `<span class="mono">${esc(l.owner)}-${esc(l.name)} v${esc(l.version)}</span>`
+          : `<span class="mono">${esc(l.name)}</span> <span class="mono muted">v${esc(l.from)} → v${esc(l.version)}</span>`;
+    const warn = l.protected ? '<span class="badge warn">Required in ValheimEnforcer</span>' : '';
+    return `<li><label class="dep-check"><input type="checkbox" value="${i}" ${l.protected ? '' : 'checked'}> <span class="badge ${l.action === 'remove' ? 'bad' : 'info'}">${RESTORE_LABEL[l.action]}</span> ${what} ${warn}</label></li>`;
+  };
+  const res = await dialog({
+    title: `Restore mods to ${item.kind === 'backup' ? 'this backup' : 'this snapshot'}?`,
+    tone: 'warn',
+    html: `<p><strong>${esc(plan.label)}</strong>${plan.ts ? ` <span class="muted">· ${esc(new Date(plan.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</span>` : ''}. Untick anything you want to leave alone.</p>
+      <ul class="dialog-list dep-list">${doable.map((l, i) => row(l, i)).join('')}</ul>
+      ${plan.unchanged ? `<p class="muted">${pluralize(plan.unchanged, 'mod')} already match.</p>` : ''}
+      ${manual.length ? `<p class="muted">Can't be restored from here: ${esc(manual.map((l) => `${l.name || l.folder}${l.note ? ` (${l.note})` : ''}`).join(', '))}.</p>` : ''}
+      ${plan.checked ? '' : '<p class="muted">The package lists could not be loaded, so availability was not checked. Anything unavailable will fail and be skipped.</p>'}
+      <p class="muted">Stop the server first if you can. A snapshot of the current state is saved before anything changes, so this can be undone. Reinstalled mods start as Unlisted: after the next start, re-apply their category in Installed.</p>`,
+    actions: [{ key: 'go', label: 'Restore ticked', variant: 'btn-warn' }],
+    collect: (body) => {
+      const v = [...body.querySelectorAll('input[type=checkbox]:checked')].map((x) => doable[parseInt(x.value, 10)]);
+      return v.length ? v : { error: 'Tick at least one change.' };
+    },
+  });
+  if (!res || res.key !== 'go') return;
+  await runRestore(plan.label, res.value);
+}
+
+async function runRestore(label, lines) {
+  showModsTab('history');
+  const out = $('mods-output');
+  out.textContent = `Saving the current mod list before restoring (${label})...\n`;
+  try {
+    await api('/api/mods/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Before a restore' }) });
+  } catch (e) {
+    out.textContent += `[error] could not save a snapshot first (${e.message}) - nothing was changed.\n`;
+    toast('error', 'Restore stopped', 'The safety snapshot could not be saved, so nothing was changed.');
+    return;
+  }
+  let done = 0;
+  const failed = [];
+  for (const l of lines) {
+    out.textContent += `\n--- ${RESTORE_LABEL[l.action]} ${l.name || l.folder}${l.action === 'remove' ? '' : ` v${l.version}`} ---\n`;
+    let ok;
+    if (l.action === 'remove') {
+      const result = await streamPost('/api/mods/remove', { name: l.folder, force: !!l.protected }, out);
+      ok = result.includes(`REMOVED ${l.folder}`);
+      if (ok) logChange('remove', l.folder, {});
+    } else {
+      const folder = l.action === 'install' ? `${l.owner}-${l.name}-${l.version}` : l.folder;
+      const result = await streamPost('/api/mods/install', { namespace: l.owner, name: folder, packageName: l.name, version: l.version, source: l.source || 'thunderstore' }, out);
+      ok = result.includes(`INSTALLED ${folder} ${l.version}`);
+      if (ok) logChange(l.action === 'install' ? 'install' : 'update', folder, { version: l.version, source: l.source });
+    }
+    if (ok) done++;
+    else failed.push(l.name || l.folder);
+  }
+  out.textContent += `\nRestore finished: ${done} of ${lines.length} done${failed.length ? `, failed: ${failed.join(', ')}` : ''}.\n`;
+  if (failed.length) toast('warn', `Restored ${done} of ${lines.length}`, `Failed: ${failed.join(', ')}. See the action log.`);
+  else toast('success', 'Mods restored', `${pluralize(done, 'change')} applied. Start the server to load them.`);
+  loadInstalledMods();
+  loadHistory();
+}
+
+/* ==========================================================================
+   Migration to a new VPS (API: /api/migration/*)
+   ========================================================================== */
+
+const mig = { preview: null, exportToken: null, importToken: null, inspect: null };
+
+function migTab(name) {
+  qsa('.mig-tab').forEach((b) => b.classList.toggle('active', b.dataset.migtab === name));
+  qsa('.mig-panel').forEach((p) => p.classList.toggle('active', p.id === 'mig-' + name));
+}
+
+const mbText = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+// Sizes from the VPS arrive in KB / bytes; show whatever unit reads naturally.
+function fmtBytes(n) {
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(1)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+async function loadMigration() {
+  const box = $('mig-worlds');
+  box.innerHTML = '<p class="muted" style="padding:0 16px">Looking at your worlds…</p>';
+  try {
+    mig.preview = await api('/api/migration/preview');
+  } catch (e) {
+    box.innerHTML = `<p class="muted" style="padding:0 16px">${esc(e.message)}</p>`;
+    return;
+  }
+  $('mig-target-host').textContent = mig.preview.host || '';
+  renderMigWorlds();
+}
+
+function renderMigWorlds() {
+  const p = mig.preview;
+  const box = $('mig-worlds');
+  if (!p.worlds.length) {
+    box.innerHTML = `<p class="muted" style="padding:0 16px">No world could be read.${Object.keys(p.errors || {}).length ? ' ' + esc(Object.values(p.errors)[0]) : ''}</p>`;
+    return;
+  }
+  box.innerHTML = p.worlds
+    .map((w) => {
+      const size = [`Saves ${fmtBytes(w.savesKB * 1024)}`, `Mods ${fmtBytes((w.modsKB + w.extrasKB) * 1024)}`].join(' · ');
+      const warn = !w.accountExists ? '<span class="badge bad">No game account</span>' : w.running ? '<span class="badge warn">Running</span>' : '<span class="badge good">Stopped</span>';
+      return `<label class="mig-row"><input type="checkbox" class="mig-w" value="${esc(w.id)}" ${w.accountExists ? 'checked' : 'disabled'}>
+        <div class="mig-row-main"><div class="mig-row-title"><strong>${esc(w.label)}</strong> <span class="mono muted">${esc(w.id)}</span> ${warn}</div>
+        <div class="mig-row-sub">${esc(size)}${w.worlds.length ? ` · world${w.worlds.length > 1 ? 's' : ''}: ${esc(w.worlds.join(', '))}` : ' · no save yet'}</div></div></label>`;
+    })
+    .join('') + Object.entries(p.errors || {}).map(([id, m]) => `<p class="muted" style="padding:0 16px">${esc(id)}: ${esc(m)}</p>`).join('');
+  $('mig-space').textContent = `Free space for the bundle on the VPS: ${mbText(p.freeMB || 0)}`;
+}
+
+async function migBuild() {
+  const ids = qsa('.mig-w:checked').map((x) => x.value);
+  const saves = $('mig-inc-saves').checked;
+  const mods = $('mig-inc-mods').checked;
+  if (!ids.length) return toast('warn', 'Choose a world', 'Tick at least one world to export.');
+  if (!saves && !mods) return toast('warn', 'Choose what to include', 'Include worlds and settings, mods and configs, or both.');
+  const running = ids.filter((id) => (mig.preview.worlds.find((w) => w.id === id) || {}).running);
+  let allowRunning = false;
+  if (running.length) {
+    const res = await dialog({
+      title: 'A world is still running',
+      tone: 'warn',
+      html: `<p>${esc(running.join(', '))} ${running.length > 1 ? 'are' : 'is'} running. A save that is being written can end up slightly behind or inconsistent in the bundle.</p><p>Stop ${running.length > 1 ? 'them' : 'it'} first (Dashboard) and build the bundle again for a clean copy, or export anyway.</p>`,
+      actions: [{ key: 'go', label: 'Export anyway', variant: 'btn-warn' }],
+      cancelLabel: 'Go back',
+    });
+    if (!res) return;
+    allowRunning = true;
+  }
+  const out = $('mig-export-out');
+  out.textContent = '';
+  $('mig-result').classList.add('hidden');
+  $('mig-build-btn').disabled = true;
+  const text = await streamPost('/api/migration/export', { worlds: ids, saves, mods, allowRunning }, out);
+  $('mig-build-btn').disabled = false;
+  const m = /EXPORT_READY (\d{14}) (\d+)/.exec(text);
+  if (!m) {
+    if (/\[running\]/.test(text)) toast('warn', 'A world is running', 'Stop it, or choose Export anyway.');
+    else toast('error', 'Export failed', 'See the output below.');
+    return;
+  }
+  mig.exportToken = m[1];
+  $('mig-result-sub').textContent = `About ${fmtBytes(Number(m[2]))} · ${pluralize(ids.length, 'world')}`;
+  $('mig-download').href = `/api/migration/download/${m[1]}`;
+  $('mig-download').setAttribute('download', `valheim-migration-${m[1]}.tar`);
+  $('mig-result').classList.remove('hidden');
+  toast('success', 'Bundle ready', 'Download it, then remove it from the VPS.');
+}
+
+async function migDiscardExport() {
+  if (!mig.exportToken) return;
+  const ok = await confirmDialog({ title: 'Remove the bundle from the VPS?', tone: 'info', html: '<p>This only deletes the staged copy on the VPS. If you have not downloaded it yet, you will have to build it again.</p>', confirmLabel: 'Remove' });
+  if (!ok) return;
+  try {
+    await api(`/api/migration/export/${mig.exportToken}`, { method: 'DELETE' });
+    mig.exportToken = null;
+    $('mig-result').classList.add('hidden');
+    toast('success', 'Removed from the VPS');
+  } catch (e) {
+    toast('error', 'Could not remove it', e.message);
+  }
+}
+
+function migUpload() {
+  const f = $('mig-file').files[0];
+  if (!f) return toast('warn', 'Choose a file', 'Pick the .tar bundle you downloaded.');
+  const btn = $('mig-upload-btn');
+  btn.disabled = true;
+  $('mig-up-meter').classList.remove('hidden');
+  $('mig-up-text').classList.remove('hidden');
+  const bar = $('mig-up-bar');
+  const out = $('mig-import-out');
+  out.textContent = `Uploading ${f.name} (${fmtBytes(f.size)})...\n`;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/migration/upload');
+  xhr.setRequestHeader('X-VGUI', '1');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.setRequestHeader('X-Bundle-Size', String(f.size));
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    bar.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
+    $('mig-up-text').textContent = `${fmtBytes(e.loaded)} of ${fmtBytes(e.total)}`;
+  };
+  xhr.onerror = () => {
+    btn.disabled = false;
+    out.textContent += '[error] the upload failed (connection lost).\n';
+    toast('error', 'Upload failed', 'The connection was lost.');
+  };
+  xhr.onload = async () => {
+    btn.disabled = false;
+    let j = null;
+    try {
+      j = JSON.parse(xhr.responseText);
+    } catch (e) {}
+    if (xhr.status !== 200 || !j || !j.token) {
+      out.textContent += `[error] ${(j && j.error) || `HTTP ${xhr.status}`}\n`;
+      toast('error', 'Upload failed', (j && j.error) || `HTTP ${xhr.status}`);
+      return;
+    }
+    mig.importToken = j.token;
+    bar.style.width = '100%';
+    out.textContent += `Uploaded and saved on the VPS (${j.bytes} bytes).\n`;
+    await migInspect();
+  };
+  xhr.send(f);
+}
+
+async function migInspect() {
+  try {
+    mig.inspect = await api(`/api/migration/inspect/${mig.importToken}`);
+  } catch (e) {
+    $('mig-import-out').textContent += `[error] ${e.message}\n`;
+    toast('error', 'Not a usable bundle', e.message);
+    return;
+  }
+  const m = mig.inspect.manifest;
+  $('mig-inspect-sub').textContent = `Made ${m.createdAt ? new Date(m.createdAt).toLocaleString() : 'at an unknown time'}${m.guiVersion ? ` by GUI ${m.guiVersion}` : ''}. It holds ${[m.includes.saves ? 'worlds and settings' : '', m.includes.mods ? 'mods and configs' : ''].filter(Boolean).join(' and ')}.`;
+  $('mig-imp-saves').checked = m.includes.saves;
+  $('mig-imp-saves').disabled = !m.includes.saves;
+  $('mig-imp-mods').checked = m.includes.mods;
+  $('mig-imp-mods').disabled = !m.includes.mods;
+  renderMigTargets();
+  $('mig-inspect').classList.remove('hidden');
+}
+
+function renderMigTargets() {
+  const box = $('mig-targets');
+  box.innerHTML = mig.inspect.targets
+    .map((t) => {
+      const p = t.target;
+      const notes = [];
+      let ready = true;
+      if (!t.known) {
+        notes.push('<span class="badge warn">Not in this GUI yet</span> <button class="btn btn-secondary btn-sm" type="button" onclick="migAddWorld(\'' + esc(t.id) + '\')">Add it</button>');
+        ready = false;
+      } else if (t.targetError) {
+        notes.push(`<span class="badge bad">${esc(t.targetError)}</span>`);
+        ready = false;
+      } else if (p) {
+        if (!p.accountExists) {
+          notes.push('<span class="badge bad">No game account yet: run Setup steps 1 and 2 for this world</span>');
+          ready = false;
+        }
+        if (p.accountExists && !p.bepinexInstalled) notes.push('<span class="badge warn">BepInEx not installed yet (Setup step 4); mods can not be imported until it is</span>');
+        if (p.running) {
+          notes.push('<span class="badge warn">Running: stop it first</span>');
+          ready = false;
+        }
+        if (p.worlds.length) notes.push(`<span class="badge info">Has saves already (${esc(p.worlds.join(', '))})</span>`);
+      }
+      const hasSaves = t.parts.includes('saves.tgz');
+      const hasMods = t.parts.includes('bepinex.tgz');
+      return `<div class="mig-row"><input type="checkbox" class="mig-t" value="${esc(t.id)}" ${ready ? 'checked' : 'disabled'}>
+        <div class="mig-row-main"><div class="mig-row-title"><strong>${esc(t.label)}</strong> <span class="mono muted">${esc(t.id)}</span></div>
+        <div class="mig-row-sub">${hasSaves ? 'saves' : ''}${hasSaves && hasMods ? ' · ' : ''}${hasMods ? 'mods and configs' : ''}${!hasSaves && !hasMods ? 'nothing to import' : ''}</div>
+        <div class="mig-row-notes">${notes.join(' ')}</div></div></div>`;
+    })
+    .join('');
+}
+
+async function migAddWorld(id) {
+  try {
+    await api('/api/migration/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: mig.importToken, ids: [id] }) });
+    toast('success', 'World added', 'Now run Setup steps 1, 2 and 4 for it (pick it in the world switcher).');
+    await migInspect();
+  } catch (e) {
+    toast('error', 'Could not add the world', e.message);
+  }
+}
+
+async function migVerify() {
+  if (!mig.importToken) return;
+  const out = $('mig-import-out');
+  out.textContent += '\nChecking every part against its checksum...\n';
+  const text = await streamPost(`/api/migration/verify/${mig.importToken}`, {}, out);
+  if (/VERIFIED/.test(text)) toast('success', 'Bundle is intact', 'Every part matches its checksum.');
+  else toast('error', 'Bundle is damaged', 'Upload it again.');
+  return /VERIFIED/.test(text);
+}
+
+async function migImport() {
+  const ids = qsa('.mig-t:checked').map((x) => x.value);
+  const saves = $('mig-imp-saves').checked;
+  const mods = $('mig-imp-mods').checked;
+  if (!ids.length) return toast('warn', 'Choose a world', 'Tick at least one world to import.');
+  if (!saves && !mods) return toast('warn', 'Choose what to import', 'Import worlds and settings, mods and configs, or both.');
+  const ok = await confirmDialog({
+    title: `Import ${pluralize(ids.length, 'world')}?`,
+    tone: 'warn',
+    html: `<p>This unpacks the bundle into: <strong>${esc(ids.join(', '))}</strong>.</p>
+      <p>The bundle is checked first. Anything it replaces (saves, LinuxGSM config, plugins and configs) is moved to <span class="mono">pre-migration-&lt;time&gt;</span> in that world's home folder, not deleted.</p>`,
+    confirmLabel: 'Import',
+  });
+  if (!ok) return;
+  const out = $('mig-import-out');
+  $('mig-import-btn').disabled = true;
+  if (!(await migVerify())) {
+    $('mig-import-btn').disabled = false;
+    return;
+  }
+  const done = [];
+  const failed = [];
+  for (const id of ids) {
+    out.textContent += `\n=== ${id} ===\n`;
+    let overwrite = false;
+    let text = await streamPost('/api/migration/import', { token: mig.importToken, id, saves, mods, overwrite }, out);
+    if (/\[collision\]/.test(text)) {
+      const res = await dialog({
+        title: `${id} already has saves here`,
+        tone: 'warn',
+        html: '<p>This world already has save files on this VPS. Replace them with the ones from the bundle? The current ones are moved to <span class="mono">pre-migration-&lt;time&gt;</span>, not deleted.</p>',
+        actions: [{ key: 'go', label: 'Replace', variant: 'btn-warn' }],
+        cancelLabel: 'Skip this world',
+      });
+      if (!res) {
+        failed.push(id);
+        continue;
+      }
+      overwrite = true;
+      text = await streamPost('/api/migration/import', { token: mig.importToken, id, saves, mods, overwrite }, out);
+    }
+    if (new RegExp(`IMPORTED ${id}\\b`).test(text)) done.push(id);
+    else failed.push(id);
+  }
+  $('mig-import-btn').disabled = false;
+  out.textContent += `\nImport finished: ${done.length} of ${ids.length} world(s) imported${failed.length ? `, not imported: ${failed.join(', ')}` : ''}.\n`;
+  if (done.length) {
+    await dialog({
+      title: failed.length ? 'Imported with problems' : 'Import finished',
+      tone: failed.length ? 'warn' : 'info',
+      html: `<p>${esc(done.join(', '))} imported.${failed.length ? ` Not imported: ${esc(failed.join(', '))} (see the output).` : ''}</p>
+        <p>Before you start the server:</p>
+        <ul class="dialog-list"><li>Run <strong>Setup step 7</strong> (helper scripts and cron jobs) so backups, update checks and health alerts run on this VPS.</li>
+        <li>Open the world's UDP ports in the firewall (Worlds page) and in your VPS provider's panel.</li>
+        <li>Start the server, then give players the new address.</li></ul>
+        <p class="muted">The bundle is still on the VPS. Remove it from the Import tab when you are done.</p>`,
+      actions: [],
+      cancelLabel: 'Close',
+    });
+  } else toast('error', 'Nothing was imported', 'See the output.');
 }
 
 // API: POST /api/mods/categorize
@@ -2908,11 +3525,14 @@ function renderBackups() {
     li.innerHTML = `<span class="row-icon">${icon('archive')}</span>
       <div class="row-main"><div class="row-title"><span class="mod-name mono" style="font-size:12.5px">${esc(f)}</span>${i === 0 && backupSortDesc && !q ? '<span class="badge good">Latest</span>' : ''}</div>
       <div class="row-desc bk-date">${t ? `${new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${timeAgo(t)}` : 'Date unknown'}</div></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-warn btn-sm';
-    btn.innerHTML = `${icon('rotate')}Restore`;
-    btn.onclick = () => restoreBackup(f);
-    li.appendChild(btn);
+    // Only a .tar.gz archive can be restored (the server refuses anything else).
+    if (/\.tar\.gz$/.test(f)) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-warn btn-sm';
+      btn.innerHTML = `${icon('rotate')}Restore`;
+      btn.onclick = () => restoreBackup(f);
+      li.appendChild(btn);
+    }
     list.appendChild(li);
   });
 }
@@ -3342,7 +3962,7 @@ async function testDiscord(which) {
 
 /* ---- Health alerts (cron on the VPS; API: /api/health) ---- */
 
-function renderHealth(h) {
+function renderHealthAlerts(h) {
   $('hl-enabled').checked = h.enabled;
   $('hl-minutes').value = String(h.minutes);
   $('hl-live').checked = h.live;
@@ -3365,7 +3985,7 @@ function renderHealth(h) {
 async function loadHealth() {
   if (!$('hl-state')) return;
   try {
-    renderHealth(await api('/api/health/schedule'));
+    renderHealthAlerts(await api('/api/health/schedule'));
   } catch (e) {
     $('hl-state').textContent = e.message;
   }
@@ -3386,7 +4006,7 @@ async function saveHealth() {
         mem: Number($('hl-mem').value) || 10,
       }),
     });
-    renderHealth(r);
+    renderHealthAlerts(r);
     toast('success', r.enabled ? 'Health alerts are on' : 'Health alerts are off');
   } catch (e) {
     toast('error', 'Could not save health alerts', e.message);
@@ -3399,7 +4019,7 @@ async function runHealth() {
   setBtnLoading(btn, true);
   try {
     const r = await api('/api/health/run', { method: 'POST' });
-    renderHealth(r);
+    renderHealthAlerts(r);
     toast(r.lastRun && r.lastRun.ok ? 'success' : 'info', 'Check finished', r.lastRun ? r.lastRun.message : undefined);
   } catch (e) {
     toast('error', 'Could not run the check', e.message);

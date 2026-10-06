@@ -26,7 +26,10 @@ Lists everything in `BepInEx/plugins`, tagged **Required**, **Admin-only**, **Se
 - **Categories.** Move a mod between Required, Optional, Admin-only and Server-only without editing YAML.
 - **Disable and Remove.** Disable keeps the files and moves the mod to Optional; Remove deletes the folder and its `Mods.yaml` entry. Both ask you to type `FORCE` for Required or Admin-only mods.
 - **Bulk actions** for update, remove and recategorize.
-- **Dependency check** when installing a mod, with the option to continue anyway.
+- **Dependencies on install.** If a mod needs mods you do not have, the prompt lists them and offers **Install with dependencies**, **Install only this mod** or Cancel. Dependencies are installed first, using their latest version.
+- **Dependencies on remove.** Removing a mod asks about installed mods that need it and about libraries that nothing else uses, and keeps libraries other mods still need. Bulk remove does the same for the selection.
+- **Dependencies on update.** If the new version needs mods you do not have, the update dialog lists them and offers **Update with dependencies**, **Update only** or Cancel. Works for single, manual and bulk updates.
+- **History and rollback.** The Mods > History tab lists snapshots of the mod list, saved automatically before each install, update or removal, plus one per nightly backup. Restore shows a plan (which mods go back to which version, which are reinstalled or removed) and you confirm it. It never touches mod configs or the world.
 - **Current Requirements** list with links and one-click Gale install links, and a "Copy as text" button for Discord.
 - **Generate codes.** Gale profile codes for players and admins, built from the installed mods.
 - **Action log and Notify Discord.** Changes are collected and sent as one summary when you press the button.
@@ -74,6 +77,10 @@ A snapshot of the LinuxGSM console log or `LogOutput.log`, plus a "Go Live" togg
 Run several worlds at the same time, and remove one cleanly (including deleting it from the VPS and closing its firewall ports): [Multiple worlds](MULTIPLE_WORLDS.md).
 
 ![Worlds page](images/worlds.png)
+
+## Migration
+
+- **Move to a new VPS.** Export worlds as one bundle (saves, LinuxGSM settings, mods and configs), download it, and import it on the new VPS after Setup. Checksummed, verified before unpacking, and nothing is deleted on either side. Details: [Moving to a new VPS](MIGRATION.md).
 
 ## Restart-required banner
 

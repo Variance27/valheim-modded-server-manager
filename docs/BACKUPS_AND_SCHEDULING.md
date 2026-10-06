@@ -11,6 +11,10 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 CLOUD_REMOTE=MyRemote:Valheim-Backups     # empty or unset = local backups only
 ```
 
+## Mod list records
+
+Next to each archive the backup script writes two small text files: `<world>-<date>-plugins.txt` (the plugin files found) and `<world>-<date>-mods.txt` (the installed mod folders and which package and version each came from, as JSON). They are removed together with the archive, copied to the cloud remote if one is set, and hidden from the Backups list. The `-mods.txt` files feed **Mods > History**, so an old backup's mod set can be restored without restoring the world. The GUI also keeps its own snapshots, one per install, update or removal, in `mod-snapshots/` in the world's game-account home folder.
+
 ## Restore
 
 The Backups tab can restore an archive. You type `RESTORE` to confirm, and it:

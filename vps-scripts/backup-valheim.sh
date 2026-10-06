@@ -52,6 +52,7 @@ DATE="$(date +%F-%H%M)"
 
 ARCHIVE="$BACKUP_DIR/${WORLD_NAME}-$DATE.tar.gz"
 MANIFEST="$BACKUP_DIR/${WORLD_NAME}-$DATE-plugins.txt"
+MODSET="$BACKUP_DIR/${WORLD_NAME}-$DATE-mods.txt"
 
 RCLONE_LOG="$LGSM_HOME/rclone-backup.log"
 FAIL_LOG="$LGSM_HOME/backup-failures.log"
@@ -179,6 +180,29 @@ if [ -d "$SERVER_DIR/BepInEx/plugins" ]; then
         > "$MANIFEST" 2>/dev/null || true
 fi
 
+# The installed mod set (folders + which package/version each came from), so the GUI's Mods > History
+# tab can offer "restore the mods as they were at this backup". Best-effort and independent of the
+# archive; a failure here never fails the backup. No PyYAML needed: the file is parsed by hand.
+if [ -d "$SERVER_DIR/BepInEx/plugins" ]; then
+    python3 - "$SERVER_DIR/BepInEx/plugins" "$SERVER_DIR/BepInEx/config/ValheimEnforcer/Mods.installedFrom.yaml" > "$MODSET" 2>/dev/null <<'PYEOF' || rm -f "$MODSET"
+import json, os, sys
+plugins, rec_path = sys.argv[1], sys.argv[2]
+folders = sorted(d for d in os.listdir(plugins) if os.path.isdir(os.path.join(plugins, d)))
+recs, cur = {}, None
+if os.path.isfile(rec_path):
+    for line in open(rec_path, encoding="utf-8", errors="replace"):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" ") and line.rstrip().endswith(":"):
+            cur = line.strip()[:-1].strip("'\"")
+            recs[cur] = {}
+        elif cur and ":" in line:
+            k, v = line.strip().split(":", 1)
+            recs[cur][k.strip()] = v.strip().strip("'\"")
+print(json.dumps({"folders": folders, "installedFrom": {k: v for k, v in recs.items() if k in folders}}))
+PYEOF
+fi
+
 # ---------------------------------------------------------------------------
 # Stop server, archive
 #
@@ -219,6 +243,7 @@ tar -czf "$ARCHIVE" \
 
 chown "$LGSM_USER:$LGSM_USER" "$ARCHIVE"
 if [ -f "$MANIFEST" ]; then chown "$LGSM_USER:$LGSM_USER" "$MANIFEST"; fi
+if [ -f "$MODSET" ]; then chown "$LGSM_USER:$LGSM_USER" "$MODSET"; fi
 
 # ---------------------------------------------------------------------------
 # Restart NOW, before the slow parts (integrity check, upload, retention), so
@@ -266,7 +291,7 @@ for old_archive in "${OLD_LOCAL_ARCHIVES[@]:-}"; do
     [ -z "$old_archive" ] && continue
     rm -f "$old_archive"
     old_manifest="${old_archive%.tar.gz}-plugins.txt"
-    rm -f "$old_manifest"
+    rm -f "$old_manifest" "${old_archive%.tar.gz}-mods.txt"
     echo "$(date -Is) Pruned old local backup: $old_archive" >> "$FAIL_LOG"
 done
 
@@ -291,6 +316,10 @@ if [ -n "${CLOUD_REMOTE:-}" ]; then
 
     if [ -f "$MANIFEST" ]; then
         "$RCLONE" copy "$MANIFEST" "$CLOUD_REMOTE" \
+            --log-file "$RCLONE_LOG" --log-level INFO || true
+    fi
+    if [ -f "$MODSET" ]; then
+        "$RCLONE" copy "$MODSET" "$CLOUD_REMOTE" \
             --log-file "$RCLONE_LOG" --log-level INFO || true
     fi
 

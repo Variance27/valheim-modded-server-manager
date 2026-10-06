@@ -2,6 +2,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { startGui, client } = require('./helpers');
 
@@ -139,4 +140,150 @@ test('Health alerts: thresholds are validated only when the VPS checks apply', a
   // With the disk/memory check off, blank or stale thresholds must not block saving.
   const blank = await api.post('/api/health/schedule', { enabled: false, minutes: 15, live: true, res: false, disk: null, mem: null });
   assert.notEqual(blank.status, 400, blank.text);
+});
+
+test('the GUI script has no duplicate top-level function names (a later one silently replaces the earlier)', () => {
+  const src = fs.readFileSync(path.join(gui.dir, 'public', 'app.js'), 'utf8');
+  const names = [...src.matchAll(/^(?:async )?function ([A-Za-z0-9_$]+)/gm)].map((m) => m[1]);
+  const dups = names.filter((n, i) => names.indexOf(n) !== i);
+  assert.deepEqual(dups, []);
+});
+
+test('the backup list shows no .txt files (the -plugins.txt records are left out)', async () => {
+  const bdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-backups-'));
+  for (const f of ['W-2026-10-05-1217.tar.gz', 'W-2026-10-05-1217-plugins.txt', 'W-2026-10-04-0017.tar.gz', 'W-2026-10-04-0017-plugins.txt', 'PRE-RESTORE-W-2026-10-05-1300.tar.gz', 'notes.txt']) fs.writeFileSync(path.join(bdir, f), 'x');
+  const g = await startGui({ paths: { backupDir: bdir } });
+  try {
+    const c = client(g.base);
+    await c.post('/api/auth/login', { username: 'admin', password: g.password });
+    const r = await c.get('/api/backup/list');
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(r.json.files.slice().sort(), ['PRE-RESTORE-W-2026-10-05-1300.tar.gz', 'W-2026-10-04-0017.tar.gz', 'W-2026-10-05-1217.tar.gz']);
+  } finally {
+    g.stop();
+  }
+});
+
+test('mod snapshots: save, list with backups, and plan a restore', async (t) => {
+  const { spawnSync } = require('child_process');
+  if ((process.getuid && process.getuid() !== 0) && spawnSync('sudo', ['-n', 'true']).status !== 0) return t.skip('needs root or passwordless sudo');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-snap-'));
+  const plugins = path.join(root, 'plugins');
+  const bdir = path.join(root, 'backups');
+  const home = path.join(root, 'home');
+  for (const d of ['A-One-1.0.0', 'B-Two-2.0.0']) fs.mkdirSync(path.join(plugins, d), { recursive: true });
+  fs.mkdirSync(bdir, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(path.join(bdir, 'W-2026-10-01-0017-mods.txt'), JSON.stringify({ folders: ['A-One-0.9.0'], installedFrom: {} }));
+  fs.writeFileSync(path.join(bdir, 'W-2026-10-01-0017-plugins.txt'), 'x');
+  const g = await startGui({ lgsmHome: home, paths: { pluginsDir: plugins, backupDir: bdir } }, { fakeFetch: true });
+  try {
+    const c = client(g.base);
+    await c.post('/api/auth/login', { username: 'admin', password: g.password });
+    const saved = await c.post('/api/mods/snapshot', { reason: 'test snapshot' });
+    assert.equal(saved.status, 200, saved.text);
+    assert.equal(saved.json.count, 2);
+    const hist = await c.get('/api/mods/history');
+    assert.equal(hist.status, 200, hist.text);
+    assert.ok(hist.json.items.some((i) => i.kind === 'snapshot' && i.reason === 'test snapshot' && i.count === 2));
+    assert.ok(hist.json.items.some((i) => i.kind === 'backup' && i.id === 'backup:W-2026-10-01-0017-mods.txt'));
+
+    fs.rmSync(path.join(plugins, 'B-Two-2.0.0'), { recursive: true });
+    fs.mkdirSync(path.join(plugins, 'C-Three-1.0.0'));
+    const plan = await c.get(`/api/mods/restore-plan?id=${encodeURIComponent(saved.json.id)}`);
+    assert.equal(plan.status, 200, plan.text);
+    const by = (n) => plan.json.lines.find((l) => l.name === n);
+    assert.equal(by('Two').action, 'install');
+    assert.equal(by('Two').source, 'thunderstore');
+    assert.equal(plan.json.checked, true);
+    assert.equal(by('Three').action, 'remove');
+    assert.equal(plan.json.unchanged, 1);
+
+    // a version that is no longer published cannot be restored automatically
+    fs.mkdirSync(path.join(plugins, 'B-Two-0.5.0'));
+    const stale = await c.post('/api/mods/snapshot', { reason: 'stale' });
+    fs.rmSync(path.join(plugins, 'B-Two-0.5.0'), { recursive: true });
+    const plan2 = await c.get(`/api/mods/restore-plan?id=${encodeURIComponent(stale.json.id)}`);
+    assert.equal(plan2.json.lines.find((l) => l.name === 'Two' && l.action === 'manual').note, 'Version 0.5.0 is no longer published.');
+
+    // ids are validated: no path tricks
+    assert.equal((await c.get('/api/mods/restore-plan?id=backup:../etc/passwd')).status, 404);
+    assert.equal((await c.get('/api/mods/restore-plan?id=snap:../../x')).status, 404);
+  } finally {
+    g.stop();
+  }
+});
+
+test('migration: preview, export, download, upload, verify and import through the API', async (t) => {
+  const { spawnSync } = require('child_process');
+  if ((process.getuid && process.getuid() !== 0) && spawnSync('sudo', ['-n', 'true']).status !== 0) return t.skip('needs root or passwordless sudo');
+  if (!/GNU tar/.test(spawnSync('tar', ['--version'], { encoding: 'utf8' }).stdout || '')) return t.skip('needs GNU tar');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-migapi-'));
+  const home = path.join(root, 'home');
+  const listDir = path.join(home, '.config/unity3d/IronGate/Valheim');
+  fs.mkdirSync(path.join(listDir, 'worlds_local'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'serverfiles/BepInEx/core'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'serverfiles/BepInEx/plugins/A-One-1.0.0'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'lgsm/config-lgsm/vhserver'), { recursive: true });
+  fs.writeFileSync(path.join(listDir, 'worlds_local/Asgard.db'), 'DB-CONTENT');
+  fs.writeFileSync(path.join(home, 'serverfiles/BepInEx/plugins/A-One-1.0.0/One.dll'), 'dll');
+  fs.writeFileSync(path.join(home, 'lgsm/config-lgsm/vhserver/vhserver.cfg'), 'servername="Asgard"\n');
+  process.env.VGUI_MIGRATION_DIR = path.join(root, 'stage');
+  const g = await startGui({ lgsmHome: home, lgsmUser: os.userInfo().username });
+  try {
+    const c = client(g.base);
+    await c.post('/api/auth/login', { username: 'admin', password: g.password });
+    assert.equal((await c.get('/api/migration/preview')).status, 200);
+    const prev = (await c.get('/api/migration/preview')).json;
+    assert.equal(prev.worlds[0].id, 'main');
+    assert.deepEqual(prev.worlds[0].worlds, ['Asgard']);
+    assert.equal(prev.worlds[0].running, false);
+
+    assert.equal((await c.post('/api/migration/export', { worlds: [], saves: true })).status, 400);
+    assert.equal((await c.post('/api/migration/export', { worlds: ['main'], saves: false, mods: false })).status, 400);
+    const exp = await c.post('/api/migration/export', { worlds: ['main'], saves: true, mods: true });
+    assert.equal(exp.status, 200, exp.text);
+    const tok = (/EXPORT_READY (\d{14}) \d+/.exec(exp.text) || [])[1];
+    assert.ok(tok, exp.text);
+
+    assert.equal((await c.get('/api/migration/download/../../etc')).status, 404);
+    const dl = await c.raw('GET', `/api/migration/download/${tok}`);
+    assert.equal(dl.status, 200);
+    assert.ok(dl.buffer.length > 1000);
+
+    const up = await c.raw('POST', '/api/migration/upload', dl.buffer, { 'Content-Type': 'application/octet-stream', 'X-Bundle-Size': String(dl.buffer.length) });
+    assert.equal(up.status, 200, up.text);
+    assert.equal(up.json.bytes, dl.buffer.length);
+    const short = await c.raw('POST', '/api/migration/upload', dl.buffer, { 'Content-Type': 'application/octet-stream', 'X-Bundle-Size': String(dl.buffer.length + 5) });
+    assert.equal(short.status, 400);
+
+    // the first upload was replaced by the second (only one staged import at a time), so use the latest token
+    const up2 = await c.raw('POST', '/api/migration/upload', dl.buffer, { 'Content-Type': 'application/octet-stream', 'X-Bundle-Size': String(dl.buffer.length) });
+    const itok = up2.json.token;
+    const insp = await c.get(`/api/migration/inspect/${itok}`);
+    assert.equal(insp.status, 200, insp.text);
+    assert.equal(insp.json.targets[0].id, 'main');
+    assert.deepEqual(insp.json.targets[0].parts.sort(), ['bepinex.tgz', 'lgsm.tgz', 'saves.tgz']);
+    assert.equal(insp.json.targets[0].known, true);
+    const ver = await c.post(`/api/migration/verify/${itok}`, {});
+    assert.match(ver.text, /VERIFIED/);
+
+    // saves already exist here: refused until overwrite is chosen, then the old copy is kept
+    const refused = await c.post('/api/migration/import', { token: itok, id: 'main', saves: true, mods: false });
+    assert.match(refused.text, /\[collision\]/);
+    fs.writeFileSync(path.join(listDir, 'worlds_local/Asgard.db'), 'LOCAL-EDIT');
+    const done = await c.post('/api/migration/import', { token: itok, id: 'main', saves: true, mods: true, overwrite: true });
+    assert.match(done.text, /IMPORTED main/, done.text);
+    assert.equal(fs.readFileSync(path.join(listDir, 'worlds_local/Asgard.db'), 'utf8'), 'DB-CONTENT');
+    assert.ok(fs.readdirSync(home).some((n) => n.startsWith('pre-migration-')));
+
+    // unknown worlds and bad ids are refused
+    assert.equal((await c.post('/api/migration/import', { token: itok, id: 'nope', saves: true })).status, 400);
+    assert.equal((await c.del(`/api/migration/import/${itok}`)).status, 200);
+    assert.equal((await c.del('/api/migration/other/12345678901234')).status, 400);
+  } finally {
+    g.stop();
+    delete process.env.VGUI_MIGRATION_DIR;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

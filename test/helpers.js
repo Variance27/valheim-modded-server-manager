@@ -20,15 +20,16 @@ function freePort() {
   });
 }
 
-async function startGui() {
+async function startGui(extraConfig = {}, { fakeFetch = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-test-'));
-  for (const f of ['server.js', 'auth.js', 'package.json']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+  for (const f of ['server.js', 'auth.js', 'modgraph.js', 'modsets.js', 'migration.js', 'package.json']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   fs.cpSync(path.join(ROOT, 'public'), path.join(dir, 'public'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'vps-scripts'), path.join(dir, 'vps-scripts'), { recursive: true });
+  if (fakeFetch) fs.copyFileSync(path.join(__dirname, 'fake-fetch.js'), path.join(dir, 'fake-fetch.js'));
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
   const port = await freePort();
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ mode: 'local', guiPort: port }));
-  const child = spawn(process.execPath, ['server.js'], { cwd: dir, env: { ...process.env, NODE_ENV: 'test' } });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ mode: 'local', guiPort: port, ...extraConfig }));
+  const child = spawn(process.execPath, ['server.js'], { cwd: dir, env: { ...process.env, NODE_ENV: 'test', ...(fakeFetch ? { NODE_OPTIONS: `--require ${path.join(dir, 'fake-fetch.js')}` } : {}) } });
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
@@ -66,7 +67,17 @@ function client(base) {
     try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
     return { status: r.status, json, text, headers: r.headers };
   }
-  return { call, get: (u) => call('GET', u), post: (u, b) => call('POST', u, b ?? {}), del: (u) => call('DELETE', u) };
+  // Binary bodies and responses (migration bundles).
+  async function raw(method, url, buf, extraHeaders = {}) {
+    const headers = { 'X-VGUI': '1', ...extraHeaders };
+    if (cookie) headers.Cookie = cookie;
+    const r = await fetch(base + url, { method, headers, body: buf, redirect: 'manual' });
+    const buffer = Buffer.from(await r.arrayBuffer());
+    let json = null;
+    try { json = JSON.parse(buffer.toString('utf8')); } catch (e) { /* not JSON */ }
+    return { status: r.status, json, buffer, text: buffer.toString('utf8'), headers: r.headers };
+  }
+  return { call, raw, get: (u) => call('GET', u), post: (u, b) => call('POST', u, b ?? {}), del: (u) => call('DELETE', u) };
 }
 
 module.exports = { startGui, client, ROOT };

@@ -1,6 +1,6 @@
 {
   "name": "valheim-modded-server-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Web dashboard that sets up and manages modded Valheim dedicated servers (LinuxGSM + BepInEx + ValheimEnforcer) over SSH",
   "main": "server.js",
   "license": "MIT",
@@ -25,8 +25,8 @@
   "scripts": {
     "start": "node server.js",
     "set-password": "node set-password.js",
-    "check": "node --check server.js && node --check auth.js && node --check set-password.js && node --check public/app.js",
-    "test": "node --test test/api.test.js test/scripts.test.js",
+    "check": "node --check server.js && node --check auth.js && node --check modgraph.js && node --check modsets.js && node --check migration.js && node --check set-password.js && node --check public/app.js",
+    "test": "node --test test/api.test.js test/scripts.test.js test/modgraph.test.js test/modsets.test.js test/migration.test.js",
     "test:py": "python3 -m unittest discover -s test -p 'test_*.py'"
   },
   "engines": {

@@ -34,3 +34,24 @@ test('no personal data is shipped in the scripts or the GUI', () => {
     assert.ok(!/NIUByVikings|BocaueWorld/.test(text), `${path.basename(f)} contains a hard-coded server name`);
   }
 });
+
+test('the backup script records the installed mod set as JSON (no PyYAML needed)', (t) => {
+  if (spawnSync('python3', ['--version']).status !== 0) return t.skip('python3 is not available');
+  const os = require('os');
+  const src = fs.readFileSync(path.join(dir, 'backup-valheim.sh'), 'utf8');
+  const m = /<<'PYEOF'[^\n]*\n([\s\S]*?)\nPYEOF/.exec(src);
+  assert.ok(m, 'mod-set block not found in backup-valheim.sh');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-modset-'));
+  fs.mkdirSync(path.join(tmp, 'plugins', 'A-One-1.0.0'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'plugins', 'HandMade'));
+  fs.writeFileSync(path.join(tmp, 'rec.yaml'), "A-One-1.0.0:\n  name: One\n  owner: A\n  source: hexium\n  version: 1.0.0\nGone-X-1.0.0:\n  name: X\n");
+  fs.writeFileSync(path.join(tmp, 'x.py'), m[1]);
+  const r = spawnSync('python3', [path.join(tmp, 'x.py'), path.join(tmp, 'plugins'), path.join(tmp, 'rec.yaml')], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.deepEqual(j.folders, ['A-One-1.0.0', 'HandMade']);
+  assert.equal(j.installedFrom['A-One-1.0.0'].source, 'hexium');
+  assert.ok(!j.installedFrom['Gone-X-1.0.0'], 'records for folders that are gone are dropped');
+  // the nightly prune removes the -mods.txt with its archive
+  assert.match(src, /rm -f "\$old_manifest" "\$\{old_archive%\.tar\.gz\}-mods\.txt"/);
+});

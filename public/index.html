@@ -51,6 +51,7 @@
     <symbol id="i-memory" viewBox="0 0 24 24"><path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3"/><rect x="2" y="6" width="20" height="10" rx="1.5"/><path d="M8 10v2M12 10v2M16 10v2"/></symbol>
     <symbol id="i-disk" viewBox="0 0 24 24"><path d="M22 12H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/><path d="M6 16h.01M10 16h.01"/></symbol>
     <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="m5 9-3 3 3 3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
@@ -126,6 +127,7 @@
         <a href="#updates" class="sb-item" data-page="updates" data-tip="Server updates" data-tip-side="right"><svg class="i"><use href="#i-download-cloud"/></svg><span>Updates</span></a>
         <a href="#settings" class="sb-item" data-page="settings" data-tip="Server settings" data-tip-side="right"><svg class="i"><use href="#i-shield"/></svg><span>Settings</span></a>
         <a href="#setup" class="sb-item" data-page="setup" data-tip="First-time setup" data-tip-side="right"><svg class="i"><use href="#i-wrench"/></svg><span>Setup</span><span class="sb-count hidden" id="sb-setup-count"></span></a>
+        <a href="#migration" class="sb-item" data-page="migration" data-tip="Move to a new VPS" data-tip-side="right"><svg class="i"><use href="#i-move"/></svg><span>Migration</span></a>
       </div>
       <div class="game-zomboid">
         <div class="sb-section-label">Overview</div>
@@ -343,6 +345,7 @@
           <button class="subtab active" role="tab" data-subtab="installed">Installed <span class="subtab-count" id="installed-mods-count"></span></button>
           <button class="subtab" role="tab" data-subtab="disabled">Disabled <span class="subtab-count" id="disabled-mods-count"></span></button>
           <button class="subtab" role="tab" data-subtab="browse">Browse &amp; install</button>
+          <button class="subtab" role="tab" data-subtab="history">History</button>
           <button class="subtab" role="tab" data-subtab="requirements">Requirements</button>
           <button class="subtab" role="tab" data-subtab="codes">Profile codes</button>
         </div>
@@ -431,6 +434,22 @@
             </div>
 
             <!-- Requirements -->
+            <div class="subpanel" id="sub-history">
+              <div class="card card-flush">
+                <div class="card-head padded">
+                  <div>
+                    <h2 class="card-title">Mod history</h2>
+                    <p class="card-sub">The mod list is saved automatically before every install, update or removal, and with each nightly backup. Restore puts the mods back as they were (versions only: configs and the world are not touched). You see a plan first.</p>
+                  </div>
+                  <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" onclick="loadHistory()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+                    <button class="btn btn-primary btn-sm" onclick="saveSnapshot()"><svg class="i"><use href="#i-archive"/></svg>Save snapshot now</button>
+                  </div>
+                </div>
+                <ul id="history-list" class="row-list"></ul>
+              </div>
+            </div>
+
             <div class="subpanel" id="sub-requirements">
               <div class="card card-flush">
                 <div class="card-head padded">
@@ -643,53 +662,58 @@
         </div>
         <div class="card" style="margin-bottom:16px">
           <div class="card-head"><div><h2 class="card-title">Discord notifications</h2><p class="card-sub">Two channels, shared by all worlds (alerts from extra worlds start with the world's name). Saved on the machine running this GUI; the full URL is never shown again.</p></div></div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;padding:8px 16px 8px">
-            <div>
-              <label class="card-title" style="font-size:13px" for="dc-changes">Changes channel</label>
-              <p class="card-note" style="margin:2px 0 8px">Mod install, update and remove summaries sent by the Mods tab's "Notify Discord" button.</p>
-              <input class="input" id="dc-changes" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…" style="width:100%">
-              <p class="card-note" id="dc-changes-state" style="margin:6px 0 8px"></p>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-sm" onclick="testDiscord('changes')">Send test</button>
-                <button class="btn btn-sm" id="dc-changes-clear" onclick="clearDiscord('changes')">Remove</button>
+          <div class="set-grid">
+            <div class="set-panel">
+              <label class="set-title" for="dc-changes">Changes channel</label>
+              <p class="card-note">Mod install, update and remove summaries sent by the Mods tab's "Notify Discord" button.</p>
+              <input class="input" id="dc-changes" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…">
+              <p class="card-note" id="dc-changes-state"></p>
+              <div class="btn-row">
+                <button class="btn btn-secondary btn-sm" onclick="testDiscord('changes')">Send test</button>
+                <button class="btn btn-secondary btn-sm" id="dc-changes-clear" onclick="clearDiscord('changes')">Remove</button>
               </div>
             </div>
-            <div>
-              <label class="card-title" style="font-size:13px" for="dc-status">Status channel</label>
-              <p class="card-note" style="margin:2px 0 8px">Automatic alerts: backup failed, server restarted after a backup, server update available. Leave empty to use the changes channel.</p>
-              <input class="input" id="dc-status" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…" style="width:100%">
-              <p class="card-note" id="dc-status-state" style="margin:6px 0 8px"></p>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-sm" onclick="testDiscord('status')">Send test</button>
-                <button class="btn btn-sm" id="dc-status-clear" onclick="clearDiscord('status')">Remove</button>
+            <div class="set-panel">
+              <label class="set-title" for="dc-status">Status channel</label>
+              <p class="card-note">Automatic alerts: backup failed, server restarted after a backup, server update available. Leave empty to use the changes channel.</p>
+              <input class="input" id="dc-status" type="password" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…">
+              <p class="card-note" id="dc-status-state"></p>
+              <div class="btn-row">
+                <button class="btn btn-secondary btn-sm" onclick="testDiscord('status')">Send test</button>
+                <button class="btn btn-secondary btn-sm" id="dc-status-clear" onclick="clearDiscord('status')">Remove</button>
               </div>
             </div>
           </div>
-          <div style="padding:8px 16px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="card-actions">
             <button class="btn btn-primary" id="dc-save" onclick="saveDiscord()">Save webhooks</button>
             <span class="card-note" id="dc-note">Saving a new status URL also updates the backup and update-check jobs on the VPS for every world.</span>
           </div>
         </div>
         <div class="card" style="margin-bottom:16px">
           <div class="card-head"><div><h2 class="card-title">Health alerts <span class="badge" id="hl-badge" style="margin-left:6px"></span></h2><p class="card-sub" id="hl-sub">A small job on the VPS checks every few minutes and posts to the status Discord channel. It keeps working when this GUI is closed. A server you stop from the GUI, or that a backup, update or restore stopped, counts as deliberate.</p></div></div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;padding:8px 16px 8px">
-            <label class="switch"><input type="checkbox" id="hl-enabled"><span class="switch-track"></span>Send alerts</label>
-            <div><label class="card-note" for="hl-minutes">Check every</label>
-              <select class="input" id="hl-minutes" style="width:100%"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">hour</option></select></div>
-            <label class="switch"><input type="checkbox" id="hl-live" checked><span class="switch-track"></span>Server stopped or crashed</label>
-            <label class="switch" id="hl-res-wrap"><input type="checkbox" id="hl-res" checked><span class="switch-track"></span>Low disk space and memory (whole VPS)</label>
-            <div id="hl-disk-wrap"><label class="card-note" for="hl-disk">Alert when disk is this full (%)</label><input class="input" id="hl-disk" type="number" min="50" max="99" value="85" style="width:100%"></div>
-            <div id="hl-mem-wrap"><label class="card-note" for="hl-mem">Alert when free memory drops below (%)</label><input class="input" id="hl-mem" type="number" min="3" max="50" value="10" style="width:100%"></div>
+          <div class="set-rows">
+            <div class="set-row"><div class="set-row-text"><strong>Send alerts</strong><span>Install the check on the VPS and post problems to the status channel.</span></div>
+              <label class="switch"><input type="checkbox" id="hl-enabled"><span class="switch-track"></span><span class="sr-only">Send alerts</span></label></div>
+            <div class="set-row"><div class="set-row-text"><strong><label for="hl-minutes">Check every</label></strong></div>
+              <select class="input" id="hl-minutes"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">hour</option></select></div>
+            <div class="set-row"><div class="set-row-text"><strong>Server stopped or crashed</strong><span>Alert when the game process is not running and nobody stopped it on purpose.</span></div>
+              <label class="switch"><input type="checkbox" id="hl-live" checked><span class="switch-track"></span><span class="sr-only">Server stopped or crashed</span></label></div>
+            <div class="set-row" id="hl-res-wrap"><div class="set-row-text"><strong>Low disk space and memory</strong><span>Checked once for the whole VPS, by the main world.</span></div>
+              <label class="switch"><input type="checkbox" id="hl-res" checked><span class="switch-track"></span><span class="sr-only">Low disk space and memory</span></label></div>
+            <div class="set-row" id="hl-disk-wrap"><div class="set-row-text"><strong><label for="hl-disk">Disk is this full (%)</label></strong><span>Alert at or above this usage.</span></div>
+              <input class="input num" id="hl-disk" type="number" min="50" max="99" value="85"></div>
+            <div class="set-row" id="hl-mem-wrap"><div class="set-row-text"><strong><label for="hl-mem">Free memory drops below (%)</label></strong><span>Alert at or below this much available RAM.</span></div>
+              <input class="input num" id="hl-mem" type="number" min="3" max="50" value="10"></div>
           </div>
-          <p class="card-note" id="hl-state" style="padding:0 16px"></p>
-          <div style="padding:8px 16px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <p class="card-note" id="hl-state"></p>
+          <div class="card-actions">
             <button class="btn btn-primary" id="hl-save" onclick="saveHealth()">Save health alerts</button>
-            <button class="btn btn-sm" id="hl-run" onclick="runHealth()">Run a check now</button>
+            <button class="btn btn-secondary btn-sm" id="hl-run" onclick="runHealth()">Run a check now</button>
           </div>
         </div>
         <div class="card" style="margin-bottom:16px">
           <div class="card-head"><div><h2 class="card-title">Discord bot <span class="badge" id="bot-badge" style="margin-left:6px"></span></h2><p class="card-sub">Optional. Lets people with permission type <code>/codes</code> in Discord to get the Gale profile code for any world. Runs as a service on the VPS, so it keeps working when this GUI is closed.</p></div></div>
-          <details style="padding:0 16px 8px">
+          <details class="set-details">
             <summary class="card-note" style="cursor:pointer">How to get the token and IDs (one time, in Discord)</summary>
             <ol class="card-note" style="margin:8px 0 0 18px;line-height:1.6">
               <li>Open <span class="mono">discord.com/developers/applications</span>, click <strong>New Application</strong>, name it.</li>
@@ -698,23 +722,23 @@
               <li>In Discord, Settings, Advanced, turn on <strong>Developer Mode</strong>. Right-click your server and choose <strong>Copy Server ID</strong>. Right-click your own name and choose <strong>Copy User ID</strong>.</li>
             </ol>
           </details>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;padding:8px 16px 8px">
-            <div><label class="card-note" for="bot-token">Bot token</label><input class="input" id="bot-token" type="password" autocomplete="new-password" spellcheck="false" style="width:100%" placeholder="Paste the token"></div>
-            <div><label class="card-note" for="bot-guild">Server ID (makes /codes appear at once)</label><input class="input" id="bot-guild" type="text" inputmode="numeric" autocomplete="off" style="width:100%"></div>
-            <div><label class="card-note" for="bot-users">Allowed user IDs (comma separated)</label><input class="input" id="bot-users" type="text" autocomplete="off" style="width:100%"></div>
-            <div><label class="card-note" for="bot-roles">Allowed role IDs (optional)</label><input class="input" id="bot-roles" type="text" autocomplete="off" style="width:100%"></div>
+          <div class="set-form">
+            <div class="field"><label class="field-label" for="bot-token">Bot token</label><input class="input" id="bot-token" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste the token"></div>
+            <div class="field"><label class="field-label" for="bot-guild">Server ID (makes /codes appear at once)</label><input class="input" id="bot-guild" type="text" inputmode="numeric" autocomplete="off"></div>
+            <div class="field"><label class="field-label" for="bot-users">Allowed user IDs (comma separated)</label><input class="input" id="bot-users" type="text" autocomplete="off"></div>
+            <div class="field"><label class="field-label" for="bot-roles">Allowed role IDs (optional)</label><input class="input" id="bot-roles" type="text" autocomplete="off"></div>
           </div>
-          <p class="card-note" id="bot-state" style="padding:0 16px"></p>
-          <div style="padding:8px 16px 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <p class="card-note" id="bot-state"></p>
+          <div class="card-actions">
             <button class="btn btn-primary" id="bot-install" onclick="installBot()">Install and start</button>
-            <button class="btn btn-sm" id="bot-restart" onclick="botService('restart')">Restart</button>
-            <button class="btn btn-sm" id="bot-stop" onclick="botService('stop')">Stop</button>
-            <button class="btn btn-sm" id="bot-start" onclick="botService('start')">Start</button>
-            <button class="btn btn-sm" id="bot-worlds" onclick="refreshBotWorlds()">Refresh worlds</button>
-            <button class="btn btn-sm" id="bot-log" onclick="showBotLog()">View log</button>
-            <button class="btn btn-sm" id="bot-remove" onclick="removeBot()">Remove bot</button>
+            <button class="btn btn-secondary btn-sm" id="bot-restart" onclick="botService('restart')">Restart</button>
+            <button class="btn btn-secondary btn-sm" id="bot-stop" onclick="botService('stop')">Stop</button>
+            <button class="btn btn-secondary btn-sm" id="bot-start" onclick="botService('start')">Start</button>
+            <button class="btn btn-secondary btn-sm" id="bot-worlds" onclick="refreshBotWorlds()">Refresh worlds</button>
+            <button class="btn btn-secondary btn-sm" id="bot-log" onclick="showBotLog()">View log</button>
+            <button class="btn btn-secondary btn-sm" id="bot-remove" onclick="removeBot()">Remove bot</button>
           </div>
-          <div style="padding:0 16px 16px"><pre id="bot-output" class="console short" data-empty="Nothing run yet."></pre></div>
+          <pre id="bot-output" class="console short" data-empty="Nothing run yet." style="margin-top:14px"></pre>
         </div>
         <div class="card">
           <div class="card-head"><div><h2 class="card-title">Admins, bans and whitelist</h2><p class="card-sub">SteamID64 (17 digits). Changes apply within about a minute — no restart.</p></div></div>
@@ -801,6 +825,98 @@
         <div class="callout info" style="margin-top:16px">
           <svg class="i"><use href="#i-info"/></svg>
           <div>Every world needs its own game port (a Valheim server uses its port and the next two, so worlds are 10 apart: 2456, 2466, 2476, ...). Open the UDP range for each world in your VPS or cloud firewall. Each extra world installs its own copy of the server (about 2 GB of disk) and its own mods.</div>
+        </div>
+      </section>
+
+      <!-- ================= MIGRATION ================= -->
+      <section id="tab-migration" class="tab-panel" data-title="Migration">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Migration</h1>
+            <p class="page-sub">Move your worlds, mods and configs to a new VPS. Export a bundle from the old VPS, point this GUI at the new one, then import it there.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-ghost btn-icon" onclick="loadMigration()" data-tip="Refresh"><svg class="i"><use href="#i-refresh"/></svg></button>
+          </div>
+        </div>
+
+        <div class="callout info">
+          <svg class="i"><use href="#i-info"/></svg>
+          <div>
+            <strong>How to move to a new VPS</strong>
+            <ol class="mig-steps">
+              <li><strong>Export</strong> here while the GUI is still connected to the old VPS, and download the bundle.</li>
+              <li>Point <code>ssh.host</code> in <code>config.json</code> at the new VPS and restart the GUI.</li>
+              <li>On the new VPS run <strong>Setup steps 1, 2 and 4</strong> (LinuxGSM, the Valheim server, BepInEx) for each world, then step 7 (helper scripts and cron jobs) after the import.</li>
+              <li><strong>Import</strong> the bundle in the Import tab, start the server, open the UDP ports in the firewall, and give players the new address.</li>
+            </ol>
+            <span class="muted">The bundle contains your server password and mod configuration, so keep the file private and delete it when you are done. Nothing on the old VPS is changed or deleted, and nothing on the new one is deleted either: what an import replaces is moved to <code>pre-migration-&lt;time&gt;</code> in the world's home folder.</span>
+          </div>
+        </div>
+
+        <div class="mig-tabs" role="tablist">
+          <button class="mig-tab active" role="tab" data-migtab="export" onclick="migTab('export')">1. Export from this VPS</button>
+          <button class="mig-tab" role="tab" data-migtab="import" onclick="migTab('import')">2. Import into this VPS</button>
+        </div>
+
+        <div class="mig-panel active" id="mig-export">
+          <div class="card">
+            <div class="card-head"><div><h2 class="card-title">What to export</h2><p class="card-sub">Pick the worlds and what to include. Stop a world first so its save is consistent.</p></div></div>
+            <div id="mig-worlds" class="mig-worlds"></div>
+            <div class="mig-options">
+              <label class="dep-check"><input type="checkbox" id="mig-inc-saves" checked> <span><strong>Worlds and settings</strong> <span class="dep-note">save files, admin/ban/permitted lists, server name, password, port and launch options</span></span></label>
+              <label class="dep-check"><input type="checkbox" id="mig-inc-mods" checked> <span><strong>Mods and configs</strong> <span class="dep-note">plugins, BepInEx configs, ValheimEnforcer files, disabled mods, mod snapshots</span></span></label>
+            </div>
+            <div class="mig-foot">
+              <span class="muted" id="mig-space"></span>
+              <button class="btn btn-primary" id="mig-build-btn" onclick="migBuild()"><svg class="i"><use href="#i-archive"/></svg>Build bundle</button>
+            </div>
+          </div>
+          <div class="card hidden" id="mig-result">
+            <div class="card-head"><div><h2 class="card-title">Bundle ready</h2><p class="card-sub" id="mig-result-sub"></p></div></div>
+            <div class="mig-foot">
+              <span class="muted">Download it to this computer. It stays on the VPS until you remove it.</span>
+              <div class="btn-group">
+                <button class="btn btn-secondary" onclick="migDiscardExport()"><svg class="i"><use href="#i-trash"/></svg>Remove from VPS</button>
+                <a class="btn btn-primary" id="mig-download" href="#" download><svg class="i"><use href="#i-download"/></svg>Download bundle</a>
+              </div>
+            </div>
+          </div>
+          <div class="console-wrap" data-console>
+            <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+            <pre id="mig-export-out" class="console" data-empty="Progress of the export shows here."></pre>
+          </div>
+        </div>
+
+        <div class="mig-panel" id="mig-import">
+          <div class="card">
+            <div class="card-head"><div><h2 class="card-title">Upload a bundle</h2><p class="card-sub">Choose the <code>.tar</code> file you downloaded. It is sent to the VPS this GUI is connected to right now: <strong id="mig-target-host">…</strong>.</p></div></div>
+            <div class="mig-foot">
+              <input type="file" id="mig-file" accept=".tar,application/x-tar">
+              <button class="btn btn-primary" id="mig-upload-btn" onclick="migUpload()"><svg class="i"><use href="#i-download-cloud"/></svg>Upload</button>
+            </div>
+            <div class="meter lg hidden" id="mig-up-meter"><div class="meter-fill" id="mig-up-bar"></div></div>
+            <p class="muted hidden" id="mig-up-text" style="margin:6px 0 0"></p>
+          </div>
+          <div class="card hidden" id="mig-inspect">
+            <div class="card-head"><div><h2 class="card-title">Bundle contents</h2><p class="card-sub" id="mig-inspect-sub"></p></div></div>
+            <div id="mig-targets" class="mig-worlds"></div>
+            <div class="mig-options">
+              <label class="dep-check"><input type="checkbox" id="mig-imp-saves" checked> <span><strong>Worlds and settings</strong></span></label>
+              <label class="dep-check"><input type="checkbox" id="mig-imp-mods" checked> <span><strong>Mods and configs</strong></span></label>
+            </div>
+            <div class="mig-foot">
+              <span class="muted">Stop the world(s) on the new VPS first if they are running.</span>
+              <div class="btn-group">
+                <button class="btn btn-secondary" id="mig-verify-btn" onclick="migVerify()"><svg class="i"><use href="#i-check"/></svg>Check integrity</button>
+                <button class="btn btn-warn" id="mig-import-btn" onclick="migImport()"><svg class="i"><use href="#i-rotate"/></svg>Import selected</button>
+              </div>
+            </div>
+          </div>
+          <div class="console-wrap" data-console>
+            <div class="console-head"><span class="console-title"><svg class="i"><use href="#i-terminal"/></svg>Output</span><span class="console-state"></span><div class="console-tools"></div></div>
+            <pre id="mig-import-out" class="console" data-empty="Upload, verification and import progress shows here."></pre>
+          </div>
         </div>
       </section>
 

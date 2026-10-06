@@ -351,7 +351,7 @@ kbd { font-size: 10.5px; font-family: var(--mono); color: var(--text-3); backgro
 .notif-dot { position: absolute; top: -3px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--bg); }
 
 /* ---------- Form controls ---------- */
-input[type="text"], input[type="search"], .select, select {
+input[type="text"], input[type="search"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], .select, select {
   height: 32px; padding: 0 10px; border-radius: var(--r-sm);
   background: var(--surface); border: 1px solid var(--border-2); color: var(--text);
   font: inherit; font-size: 13px; outline: none;
@@ -644,6 +644,9 @@ td.empty-cell { padding: 0 !important; }
 .row-list .row-main { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
 .row-list .row-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row-list .row-desc { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.dep-list li { list-style: none; margin-left: -16px; }
+.dep-check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; }
+.dep-note { color: var(--text-3); font-size: 11.5px; }
 .row-list .row-side { display: flex; align-items: center; gap: 8px; }
 .row-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-3); border: 1px solid var(--border); color: var(--text-3); flex: none; }
 .row-icon .i { width: 15px; height: 15px; }
@@ -997,3 +1000,49 @@ td.empty-cell { padding: 0 !important; }
 .world-meta dt { color: var(--text-3); }
 .world-meta dd { margin: 0; overflow-wrap: anywhere; }
 .world-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+
+/* Settings cards: Discord notifications, Health alerts, Discord bot */
+.set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.set-panel { display: flex; flex-direction: column; gap: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; min-width: 0; }
+.set-panel .card-note { margin: 0; overflow-wrap: anywhere; }
+.set-panel .input { width: 100%; }
+.set-panel .btn-row { display: flex; gap: 8px; margin-top: auto; padding-top: 6px; }
+.set-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.set-rows { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); overflow: hidden; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 16px; }
+.set-row + .set-row { border-top: 1px solid var(--border); }
+.set-row.hidden { display: none; }
+.set-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.set-row-text strong { font-size: 13px; font-weight: 500; color: var(--text); }
+.set-row-text strong label { cursor: pointer; }
+.set-row-text span { font-size: 12px; color: var(--text-3); }
+.set-row select.input { width: 160px; flex: none; }
+.set-row .input.num { width: 90px; flex: none; text-align: right; }
+.set-row .switch { flex: none; }
+.set-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+.set-details { margin-bottom: 4px; }
+.set-details summary { cursor: pointer; font-size: 12.5px; color: var(--text-3); }
+.set-details ol { margin: 8px 0 0 18px; line-height: 1.6; font-size: 12.5px; color: var(--text-3); }
+.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 16px; }
+.card-actions + .console, .set-rows + .card-note, .set-form + .card-note { margin-top: 10px; }
+@media (max-width: 560px) { .set-row select.input { width: 130px; } .set-row .input.num { width: 76px; } }
+
+/* ---- Migration ---- */
+.mig-steps { margin: 6px 0 8px 18px; padding: 0; display: grid; gap: 4px; }
+.mig-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.mig-tab { position: relative; height: 38px; padding: 0 12px; background: none; border: 0; color: var(--text-2); font-weight: 500; cursor: pointer; white-space: nowrap; transition: color var(--t-fast); }
+.mig-tab:hover, .mig-tab.active { color: var(--text); }
+.mig-tab.active::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text); }
+.mig-panel { display: none; }
+.mig-panel.active { display: block; }
+.mig-panel .card { margin-bottom: 16px; }
+.mig-worlds { display: grid; gap: 8px; padding: 0 16px 8px; }
+.mig-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); cursor: pointer; }
+.mig-row input { margin-top: 3px; }
+.mig-row-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mig-row-sub { color: var(--text-3); font-size: 12px; margin-top: 2px; }
+.mig-row-notes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.mig-options { display: grid; gap: 8px; padding: 8px 16px; }
+.mig-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 16px 16px; }
+.mig-panel .meter { margin: 0 16px; }
+.mig-foot input[type=file] { color: var(--text-2); max-width: 100%; }
