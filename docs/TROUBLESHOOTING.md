@@ -52,6 +52,22 @@ The Setup tab supports Ubuntu and Debian only. On another distribution, install 
 
 Delete `auth.json` next to `server.js` and restart the GUI. A new random password is printed once. Or run `node set-password.js`.
 
+### The update stopped the server and then failed (`steamcmd.sh: not found`, then "Checking remote build" FAIL)
+
+Seen on one server with the distro `steamcmd` package. `~/.steam/steamcmd` in the game account's home contained only a `libtinfo.so.5` symlink (created by LinuxGSM's library fix), and nothing else. The distro wrapper `/usr/games/steamcmd` only installs SteamCMD when that folder is missing, so it tried to run a `steamcmd.sh` that was not there. To repair it, as the game account:
+
+```bash
+mv ~/.steam/steamcmd ~/.steam/steamcmd.broken
+mkdir -p ~/.steam/steamcmd && cd ~/.steam/steamcmd
+curl -sqL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar zxvf -
+ln -sf /lib/i386-linux-gnu/libtinfo.so.6 libtinfo.so.5
+./steamcmd.sh +quit
+```
+
+After that, SteamCMD itself worked, but `./vhserver update` still failed at "Checking remote build". Tracing it showed SteamCMD's launcher exiting with "Couldn't find Steam root directory" only when LinuxGSM runs it; the same command worked in a normal shell. The cause inside LinuxGSM's environment was not found. Running `app_update` by hand worked but wrongly said "already up to date" while the installed build (25527701) was older than Steam's public build (25730807): SteamCMD was answering from stale cached app info. Add `+app_info_update 1` after `+login anonymous` (and delete `appinfo.vdf` under the game account's home) to make it ask Steam.
+
+`update-valheim.sh` now handles this: it checks that SteamCMD exists before stopping anything, falls back to that SteamCMD command if LinuxGSM's `update` fails, and starts the server again if both fail. Note that `./vhserver force-update` does not help here, because it still runs the remote-build check first. Re-run Setup step 7 to deploy the new script.
+
 ## Mods tab shows a wrong update badge
 
 Pick the right source in the update prompt, or set a pin from the mod's row. See [how matching works](MODS_AND_ENFORCER.md#how-a-folder-is-matched-to-a-modsyaml-entry-and-a-package). Use **Ignore Updates** for a mod that is not worth a reminder.

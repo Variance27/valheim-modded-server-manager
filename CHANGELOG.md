@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- **Apply update no longer leaves the server down when the update step fails.** `update-valheim.sh` now checks that SteamCMD exists before stopping anything, and if LinuxGSM's own `update` fails (for example at "Checking remote build") it falls back to SteamCMD's `app_update` on the same server folder (after clearing SteamCMD's cached app info and refreshing it, because a stale cache makes SteamCMD report "already up to date" while a newer build exists). If both fail, it starts the server again on the build it already had and says so in the output and in Discord. The backup gate is unchanged. Re-run Setup step 7 to install the new script.
 - The Discord notifications, Health alerts and Discord bot cards in Settings have a cleaner layout: aligned panels and rows, consistent buttons, and no extra indentation. Password and number fields now use the same styling as other inputs instead of the browser's grey default.
 - The Backups lists (Valheim and Project Zomboid) no longer show `.txt` files such as the `-plugins.txt` mod-list records, which had a Restore button that could not work, and they no longer use up the 50 listed entries. Only real backups are listed and can be restored.
 
