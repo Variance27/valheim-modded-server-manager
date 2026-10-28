@@ -52,7 +52,7 @@ The checklist reaches **all green** and a banner says "The server is up and modd
 
 - Open **Backups** and set a schedule, and **Updates** for update checks. These create cron jobs on the VPS, so they keep working when the GUI is closed.
 - Add mods from the **Mods** tab. If the server is running, the GUI shows "restart needed": press Stop, wait for `inactive`, then Start. The GUI never offers Restart so the world is always saved first.
-- Optional: set `discordWebhookUrl` and `discordStatusWebhookUrl` in `config.json`, and `CLOUD_REMOTE=<rclone remote>:<folder>` in `/home/vhserver/.config/valheim-notify.conf` for off-site backups. Without it, backups stay on the VPS.
+- Optional: set the Discord webhooks in **Settings** (or `discordWebhookUrl` and `discordStatusWebhookUrl` in `config.json`).
 
 ## If something fails
 

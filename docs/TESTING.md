@@ -4,9 +4,15 @@
 
 ```
 npm ci
-npm test          # API and script tests, run in temporary directories
+npm test          # API, script and unit tests, run in temporary directories
 npm run test:py   # Discord bot logic and the Gale code generator
+npm run lint      # undefined and unused names
+npm run check     # syntax of every JS, shell and Python file
 ```
+
+One file: `node --test test/modsets.test.js`. One test: add `--test-name-pattern "<name>"`.
+
+`test/server-boot.test.js` starts the GUI in SSH mode pointed at a closed local port, with no internet, so it also runs on Windows. The API and update-script tests use local mode and bash, so they need Linux or macOS (CI runs them on Ubuntu).
 
 CI runs the same on every push. The tests use fake `systemctl`, `ufw` and Discord endpoints; they never contact Steam, Thunderstore or a real VPS.
 

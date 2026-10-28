@@ -34,14 +34,18 @@ MANIFEST="__SERVER_DIR__/steamapps/appmanifest_896660.acf"
 STATE_FILE="$LGSM_HOME/.config/last-known-buildid"
 CONF_FILE="$LGSM_HOME/.config/valheim-notify.conf"
 
-# steamcmd: the distro package (/usr/games/steamcmd) or the copy LinuxGSM downloads
-# from Valve into the game account's home — whichever exists.
-STEAMCMD=""
-for candidate in "$(command -v steamcmd 2>/dev/null)" /usr/games/steamcmd \
-    "$LGSM_HOME/.local/share/Steam/steamcmd/steamcmd.sh" "$LGSM_HOME/.steam/steamcmd/steamcmd.sh" \
-    "$LGSM_HOME/steamcmd/steamcmd.sh"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ]; then STEAMCMD="$candidate"; break; fi
+# steamcmd candidates, in order of preference: the copies LinuxGSM keeps in the game
+# account's home first (they are self-contained), then the distro's wrapper
+# (/usr/games/steamcmd), which breaks when ~/.steam/steamcmd is missing.
+# Existence is checked as the game account, whose home may not be readable by us.
+STEAMCMDS=()
+for candidate in "$LGSM_HOME/.local/share/Steam/steamcmd/steamcmd.sh" "$LGSM_HOME/.steam/steamcmd/steamcmd.sh" \
+    "$LGSM_HOME/steamcmd/steamcmd.sh" "$(command -v steamcmd 2>/dev/null)" /usr/games/steamcmd; do
+    [ -n "$candidate" ] || continue
+    case " ${STEAMCMDS[*]:-} " in *" $candidate "*) continue ;; esac
+    if sudo -n -u "$LGSM_USER" test -x "$candidate" 2>/dev/null || [ -x "$candidate" ]; then STEAMCMDS+=("$candidate"); fi
 done
+STEAMCMD="${STEAMCMDS[0]:-}"
 # Sibling script, not a second hardcoded absolute path — resolved from
 # wherever THIS script actually lives, so it can't drift out of sync with
 # check-valheim-update.sh's own real deployed location the way the two
@@ -95,24 +99,28 @@ INSTALLED_BUILDID="$(grep -m1 '"buildid"' "$MANIFEST" | grep -oE '[0-9]+')"
 # not at all), so try up to three times, and keep what it printed so a failure can say why.
 LATEST_BUILDID=""
 STEAM_OUT=""
+USED=""
 for attempt in 1 2 3; do
-    STEAM_OUT="$(timeout 180 sudo -H -u "$LGSM_USER" "$STEAMCMD" \
-        +@ShutdownOnFailedCommand 0 \
-        +@NoPromptForPassword 1 \
-        +@sSteamCmdForcePlatformType linux \
-        +login anonymous \
-        +app_info_update 1 \
-        +app_info_print 896660 \
-        +quit 2>&1)"
-    LATEST_BUILDID="$(printf '%s\n' "$STEAM_OUT" \
-        | awk '/"branches"/{f=1} f && /"public"/{p=1} p && /"buildid"/{print; exit}' \
-        | grep -oE '[0-9]+')"
-    [ -n "$LATEST_BUILDID" ] && break
+    for cmd in "${STEAMCMDS[@]}"; do
+        USED="$cmd"
+        STEAM_OUT="$(timeout 180 sudo -H -u "$LGSM_USER" "$cmd" \
+            +@ShutdownOnFailedCommand 0 \
+            +@NoPromptForPassword 1 \
+            +@sSteamCmdForcePlatformType linux \
+            +login anonymous \
+            +app_info_update 1 \
+            +app_info_print 896660 \
+            +quit 2>&1)"
+        LATEST_BUILDID="$(printf '%s\n' "$STEAM_OUT" \
+            | awk '/"branches"/{f=1} f && /"public"/{p=1} p && /"buildid"/{print; exit}' \
+            | grep -oE '[0-9]+')"
+        [ -n "$LATEST_BUILDID" ] && break 2
+    done
     [ "$attempt" -lt 3 ] && sleep 5
 done
 
 if [ -z "$LATEST_BUILDID" ]; then
-    log_error "could not determine latest buildid from Steam (3 attempts, using $STEAMCMD as $LGSM_USER)"
+    log_error "could not determine latest buildid from Steam (3 attempts, last tried $USED as $LGSM_USER; candidates: ${STEAMCMDS[*]})"
     echo "Last lines SteamCMD printed:"
     printf '%s\n' "$STEAM_OUT" | grep -v '^\s*$' | tail -n 8 | sed 's/^/  | /'
     [ -z "$STEAM_OUT" ] && echo "  | (nothing - steamcmd printed no output; check that 'sudo -u $LGSM_USER' works without a password prompt)"

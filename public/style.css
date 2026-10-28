@@ -566,14 +566,14 @@ td.empty-cell { padding: 0 !important; }
 
 /* ---------- Subtabs ---------- */
 .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
-.subtab { position: relative; height: 38px; padding: 0 12px; background: none; border: 0; color: var(--text-2); font-weight: 500; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; transition: color var(--t-fast); }
-.subtab:hover { color: var(--text); }
-.subtab.active { color: var(--text); }
-.subtab.active::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text); }
+.subtab, .pz-subtab { position: relative; height: 38px; padding: 0 12px; background: none; border: 0; color: var(--text-2); font-weight: 500; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; transition: color var(--t-fast); }
+.subtab:hover, .pz-subtab:hover { color: var(--text); }
+.subtab.active, .pz-subtab.active { color: var(--text); }
+.subtab.active::after, .pz-subtab.active::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text); }
 .subtab-count { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .subtab-count:not(:empty) { background: var(--surface-3); padding: 1px 6px; border-radius: 8px; }
-.subpanel { display: none; }
-.subpanel.active { display: block; animation: fadeIn 200ms var(--ease); }
+.subpanel, .pz-subpanel { display: none; }
+.subpanel.active, .pz-subpanel.active { display: block; animation: fadeIn 200ms var(--ease); }
 
 /* Mods layout */
 .mods-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }

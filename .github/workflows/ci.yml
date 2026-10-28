@@ -14,12 +14,10 @@ jobs:
         with:
           node-version: 20
       - run: npm ci --no-audit --no-fund
-      - name: JavaScript syntax
+      - name: Syntax (JS, shell, Python) and LF line endings
         run: npm run check
-      - name: Shell script syntax
-        run: for f in vps-scripts/*.sh; do bash -n "$f"; done
-      - name: Python syntax
-        run: python3 -m py_compile vps-scripts/*.py
+      - name: Lint
+        run: npm run lint
       - name: Tests (GUI, login, webhooks, worlds, scripts)
         run: npm test
       - name: Tests (helper scripts and the Discord bot)

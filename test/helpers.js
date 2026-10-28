@@ -22,7 +22,8 @@ function freePort() {
 
 async function startGui(extraConfig = {}, { fakeFetch = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmsm-test-'));
-  for (const f of ['server.js', 'auth.js', 'modgraph.js', 'modsets.js', 'migration.js', 'package.json']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+  for (const f of ['server.js', 'auth.js', 'modgraph.js', 'modsets.js', 'migration.js', 'pzmodsets.js', 'package.json']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+  fs.cpSync(path.join(ROOT, 'src'), path.join(dir, 'src'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'public'), path.join(dir, 'public'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'vps-scripts'), path.join(dir, 'vps-scripts'), { recursive: true });
   if (fakeFetch) fs.copyFileSync(path.join(__dirname, 'fake-fetch.js'), path.join(dir, 'fake-fetch.js'));

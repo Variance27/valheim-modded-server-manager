@@ -28,8 +28,9 @@ Use a **throwaway VPS or VM** when working on Setup, backups, restore or world f
 Run the checks before you open a pull request:
 
 ```bash
-npm run check
-npm test                                      # GUI, login, webhooks, worlds, script syntax (no VPS needed)
+npm run check                                 # syntax of every JS, shell and Python file
+npm run lint                                  # undefined and unused names
+npm test                                      # GUI, login, webhooks, worlds, scripts (no VPS needed)
 pip install discord.py && npm run test:py     # helper scripts and the Discord bot
 ```
 
@@ -37,7 +38,7 @@ The tests start a throwaway copy of the GUI in local mode inside a temp folder, 
 
 ## Guidelines
 
-- Keep it dependency-light and build-free: plain JavaScript in `public/`, one Express file on the server.
+- Keep it dependency-light and build-free: plain JavaScript in `public/`, one file per feature in `src/` (see [Architecture](docs/ARCHITECTURE.md#overview)).
 - Every file the GUI changes on the VPS gets a `.bak.<timestamp>` copy first, and destructive actions need an explicit confirmation.
 - Code that runs outside a request (stream callbacks, timers) must capture the world id up front; see [Architecture](docs/ARCHITECTURE.md#worlds).
 - Do not hard-code a server name, world name, path or IP. Derive it from the config or the LinuxGSM settings.

@@ -1,0 +1,7 @@
+# Everything is stored and checked out with LF. The vps-scripts are uploaded
+# to Linux byte-for-byte, and a CRLF shell script fails there ($'\r').
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.pdf binary
+*.png binary
