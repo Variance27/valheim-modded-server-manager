@@ -7,12 +7,10 @@ set -Eeuo pipefail
 #
 # What it does: stops the server (so the world is saved), archives the world
 # data + BepInEx folder, restarts the server, verifies the archive, keeps the
-# newest N archives locally, and (only if CLOUD_REMOTE is set) uploads to an
-# rclone remote and keeps the newest N there.
+# newest N archives locally.
 #
 # Settings that are not paths live in the notify file ($CONF_FILE), e.g.
 #   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-#   CLOUD_REMOTE=MyRemote:Valheim-Backups     # empty/unset = local backups only
 #   WORLD_NAME=...                            # normally NOT needed (see below)
 # ---------------------------------------------------------------------------
 
@@ -28,7 +26,7 @@ CONF_DIR="$(dirname "__COMMON_CFG__")"
 
 CONF_FILE="$LGSM_HOME/.config/valheim-notify.conf"
 # shellcheck source=/dev/null
-[ -f "$CONF_FILE" ] && source "$CONF_FILE"   # may set DISCORD_WEBHOOK_URL, CLOUD_REMOTE, WORLD_NAME
+[ -f "$CONF_FILE" ] && source "$CONF_FILE"   # may set DISCORD_WEBHOOK_URL, WORLD_NAME
 
 # The world name is a server setting (worldname=... in LinuxGSM's cfg files; its
 # default is the instance name). Read it fresh on every run so renaming the world
@@ -54,12 +52,10 @@ ARCHIVE="$BACKUP_DIR/${WORLD_NAME}-$DATE.tar.gz"
 MANIFEST="$BACKUP_DIR/${WORLD_NAME}-$DATE-plugins.txt"
 MODSET="$BACKUP_DIR/${WORLD_NAME}-$DATE-mods.txt"
 
-RCLONE_LOG="$LGSM_HOME/rclone-backup.log"
 FAIL_LOG="$LGSM_HOME/backup-failures.log"
 LOCK_FILE="$LGSM_HOME/.backup-valheim.lock"
 MAINTENANCE_FLAG="$LGSM_HOME/.maintenance"
 
-CLOUD_KEEP=3          # newest N archives kept on remote
 LOCAL_KEEP=7          # newest N archives kept locally (count-based, not age-based)
 MIN_BYTES=51200       # 50 KiB floor (catches empty/truncated archives) — raise it once you know your real archive size
 SAVE_MAX_AGE=600      # seconds: after stop, newest world file must be at least this fresh
@@ -135,7 +131,7 @@ trap 'fail "unexpected error on line $LINENO"' ERR
 # Safety net for anything that ends the script while the server is down
 # (kill, cron timeout, `exit` from an unexpected place): bring it back.
 # SIGHUP is ignored so an SSH drop during a manual run cannot kill the script
-# halfway (children tar/rclone inherit the ignore). SIGKILL cannot be caught.
+# halfway (children like tar inherit the ignore). SIGKILL cannot be caught.
 on_exit() {
     local rc=$?
     trap - EXIT ERR
@@ -246,8 +242,8 @@ if [ -f "$MANIFEST" ]; then chown "$LGSM_USER:$LGSM_USER" "$MANIFEST"; fi
 if [ -f "$MODSET" ]; then chown "$LGSM_USER:$LGSM_USER" "$MODSET"; fi
 
 # ---------------------------------------------------------------------------
-# Restart NOW, before the slow parts (integrity check, upload, retention), so
-# downtime is just stop + tar and an upload problem can never keep it down.
+# Restart NOW, before the slow parts (integrity check, retention), so
+# downtime is just stop + tar.
 # Skipped when a caller (update-valheim.sh) sets SKIP_RESTART=1.
 # ---------------------------------------------------------------------------
 if [ "${SKIP_RESTART:-0}" != "1" ]; then
@@ -273,7 +269,7 @@ fi
 # ---------------------------------------------------------------------------
 ARCHIVE_BYTES=$(stat -c%s "$ARCHIVE")
 if [ "$ARCHIVE_BYTES" -lt "$MIN_BYTES" ]; then
-    fail "archive too small (${ARCHIVE_BYTES} bytes < ${MIN_BYTES} floor), refusing to upload"
+    fail "archive too small (${ARCHIVE_BYTES} bytes < ${MIN_BYTES} floor), refusing to keep it"
 fi
 
 ARCHIVE_STATE=good
@@ -296,64 +292,12 @@ for old_archive in "${OLD_LOCAL_ARCHIVES[@]:-}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Upload + cloud retention (only when CLOUD_REMOTE is set in the notify file;
-# otherwise this is a local-only backup and that is reported as such)
-# ---------------------------------------------------------------------------
-CLOUD_NOTE="local only (no CLOUD_REMOTE set)"
-if [ -n "${CLOUD_REMOTE:-}" ]; then
-    RCLONE="$(command -v rclone || true)"
-    [ -n "$RCLONE" ] || fail "CLOUD_REMOTE is set but rclone is not installed"
-
-    if ! "$RCLONE" copy \
-        "$ARCHIVE" \
-        "$CLOUD_REMOTE" \
-        --transfers 1 \
-        --checkers 4 \
-        --log-file "$RCLONE_LOG" \
-        --log-level INFO; then
-        fail "rclone copy failed, see $RCLONE_LOG"
-    fi
-
-    if [ -f "$MANIFEST" ]; then
-        "$RCLONE" copy "$MANIFEST" "$CLOUD_REMOTE" \
-            --log-file "$RCLONE_LOG" --log-level INFO || true
-    fi
-    if [ -f "$MODSET" ]; then
-        "$RCLONE" copy "$MODSET" "$CLOUD_REMOTE" \
-            --log-file "$RCLONE_LOG" --log-level INFO || true
-    fi
-
-    # Keep the newest $CLOUD_KEEP archives on the remote, via lsjson (robust vs lsl+sed)
-    OLD_BACKUPS=$("$RCLONE" lsjson "$CLOUD_REMOTE" \
-        | python3 -c "
-import json, sys
-items = json.load(sys.stdin)
-files = [f for f in items if f['Name'].startswith('${WORLD_NAME}-') and f['Name'].endswith('.tar.gz')]
-files.sort(key=lambda f: f['ModTime'], reverse=True)
-for f in files[$CLOUD_KEEP:]:
-    print(f['Name'])
-")
-
-    if [ -n "$OLD_BACKUPS" ]; then
-        while IFS= read -r old_backup; do
-            [ -z "$old_backup" ] && continue
-            "$RCLONE" deletefile \
-                "$CLOUD_REMOTE/$old_backup" \
-                --log-file "$RCLONE_LOG" \
-                --log-level INFO || true
-        done <<< "$OLD_BACKUPS"
-    fi
-    CLOUD_NOTE="cloud retention: newest ${CLOUD_KEEP}"
-fi
-
-# ---------------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------------
 HUMAN_SIZE=$(numfmt --to=iec-i --suffix=B "$ARCHIVE_BYTES")
-SUMMARY="$(basename "$ARCHIVE") (${HUMAN_SIZE}), local retention: newest ${LOCAL_KEEP}, ${CLOUD_NOTE}."
+SUMMARY="$(basename "$ARCHIVE") (${HUMAN_SIZE}), local retention: newest ${LOCAL_KEEP}."
 echo "Backup saved: $ARCHIVE ($HUMAN_SIZE)"
 echo "Local retention: newest $LOCAL_KEEP backups"
-echo "Cloud: ${CLOUD_NOTE}"
 
 if [ "${SKIP_RESTART:-0}" = "1" ]; then
     echo "Server left stopped — SKIP_RESTART=1 set, caller is responsible for restarting."
@@ -367,7 +311,7 @@ if [ "${SKIP_RESTART:-0}" = "1" ]; then
 fi
 
 if [ "$RESTART_FAILED" = "1" ]; then
-    # Archive is safely uploaded, but the server is down — exit non-zero so cron/monitors notice.
+    # Archive is safely saved, but the server is down — exit non-zero so cron/monitors notice.
     rm -f "$MAINTENANCE_FLAG"
     exit 1
 fi
