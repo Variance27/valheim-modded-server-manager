@@ -4,6 +4,6 @@
 OS of the VPS or VM, what I ran, and what I could not test.
 
 ## Checklist
-- [ ] `npm run check` passes
+- [ ] `npm run check`, `npm run lint` and `npm test` pass
 - [ ] Docs updated for any behavior change
 - [ ] No secrets, real IPs or personal server names added

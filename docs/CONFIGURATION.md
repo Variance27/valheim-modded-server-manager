@@ -61,7 +61,7 @@ Every `paths.*` value you leave out is derived from `lgsmHome`. Anything you set
 
 ## Project Zomboid (optional)
 
-A `zomboid` block enables an extra tab for a Project Zomboid server on the same VPS. It uses the same connection as Valheim. See the comments at the top of the Zomboid section in `server.js` for its keys.
+A `zomboid` block enables an extra tab for a Project Zomboid server on the same VPS. It uses the same connection as Valheim. See the comments at the top of `src/pz.js` for its keys.
 
 ## Files the GUI creates
 

@@ -2,18 +2,17 @@
 
 ## What a backup is
 
-`backup-valheim.sh` stops the server so the world is saved, archives the world data and the BepInEx folder, restarts the server, verifies the archive, keeps the newest N archives locally, and, only if `CLOUD_REMOTE` is set, uploads to an [rclone](https://rclone.org) remote and keeps the newest N there. Retention is set by `LOCAL_KEEP` and `CLOUD_KEEP`.
+`backup-valheim.sh` stops the server so the world is saved, archives the world data and the BepInEx folder, restarts the server, verifies the archive, and keeps the newest N archives on the VPS. Retention is set by `LOCAL_KEEP` (default 7).
 
 Settings that are not paths live in `/home/<game account>/.config/valheim-notify.conf` on the VPS:
 
 ```ini
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-CLOUD_REMOTE=MyRemote:Valheim-Backups     # empty or unset = local backups only
 ```
 
 ## Mod list records
 
-Next to each archive the backup script writes two small text files: `<world>-<date>-plugins.txt` (the plugin files found) and `<world>-<date>-mods.txt` (the installed mod folders and which package and version each came from, as JSON). They are removed together with the archive, copied to the cloud remote if one is set, and hidden from the Backups list. The `-mods.txt` files feed **Mods > History**, so an old backup's mod set can be restored without restoring the world. The GUI also keeps its own snapshots, one per install, update or removal, in `mod-snapshots/` in the world's game-account home folder.
+Next to each archive the backup script writes two small text files: `<world>-<date>-plugins.txt` (the plugin files found) and `<world>-<date>-mods.txt` (the installed mod folders and which package and version each came from, as JSON). They are removed together with the archive and hidden from the Backups list. The `-mods.txt` files feed **Mods > History**, so an old backup's mod set can be restored without restoring the world. The GUI also keeps its own snapshots, one per install, update or removal, in `mod-snapshots/` in the world's game-account home folder.
 
 ## Restore
 
@@ -44,7 +43,7 @@ Two channels are supported, and both are set in **Settings, then Discord notific
 
 Keeping them separate lets you mute or restrict the noisy one without losing the alerts that matter. Each field has a **Send test** button that also works on a URL you have typed but not saved yet. Once saved, the full URL is never shown again, only its last four characters.
 
-When the status channel in effect changes, the GUI refreshes it on the VPS for every installed world: it regenerates the enabled backup and update-check wrapper scripts and updates `DISCORD_WEBHOOK_URL` in each world's `valheim-notify.conf` (other lines such as `CLOUD_REMOTE` are kept). You do not need to re-save the schedules. A "Notify Discord" send reports whether the message really went through; if the webhook is wrong, you get an alert and your pending changes stay queued.
+When the status channel in effect changes, the GUI refreshes it on the VPS for every installed world: it regenerates the enabled backup and update-check wrapper scripts and updates `DISCORD_WEBHOOK_URL` in each world's `valheim-notify.conf` (its other lines are kept). You do not need to re-save the schedules. A "Notify Discord" send reports whether the message really went through; if the webhook is wrong, you get an alert and your pending changes stay queued.
 
 ## Health alerts and deliberate stops
 
