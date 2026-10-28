@@ -111,3 +111,11 @@ Add an entry whenever a bug or mistake is found: what happened, why, and the rul
   `location`...).
 - **Rule:** browser and server code have separate blocks in `eslint.config.js`. Top-level
   browser functions are used from `onclick` in HTML, so only unused locals are reported there.
+
+## Tests that create files as root must clean them up as root
+
+- **What:** the migration API test passed every assertion but failed in its cleanup on CI (and had
+  done on `main` since 2026-10-06): the scripts run via `sudo` and `chmod 700` their staging folder,
+  so the non-root test user got `EACCES` deleting it.
+- **Rule:** when a test makes something run as root, remove its output with `sudo -n rm -rf`. When
+  CI fails, check whether `main` fails the same way before assuming the new change caused it.
