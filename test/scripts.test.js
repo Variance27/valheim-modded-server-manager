@@ -26,7 +26,8 @@ test('every Python script compiles', (t) => {
 });
 
 test('no personal data is shipped in the scripts or the GUI', () => {
-  const files = [...fs.readdirSync(dir).map((f) => path.join(dir, f)), path.join(__dirname, '..', 'server.js'), path.join(__dirname, '..', 'public', 'app.js'), path.join(__dirname, '..', 'public', 'index.html')];
+  const src = path.join(__dirname, '..', 'src');
+  const files = [...fs.readdirSync(dir).map((f) => path.join(dir, f)), path.join(__dirname, '..', 'server.js'), ...fs.readdirSync(src).map((f) => path.join(src, f)), path.join(__dirname, '..', 'public', 'app.js'), path.join(__dirname, '..', 'public', 'index.html')];
   for (const f of files) {
     if (!fs.statSync(f).isFile()) continue;
     const text = fs.readFileSync(f, 'utf8');
