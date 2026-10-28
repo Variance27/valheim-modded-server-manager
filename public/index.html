@@ -1226,18 +1226,26 @@
             <p class="page-sub">Project Zomboid (Build 42, app 380870) via SteamCMD</p>
           </div>
         </div>
-        <div class="callout warn">
-          <svg class="i"><use href="#i-alert"/></svg>
-          <div>Zomboid has no separate "check" step — SteamCMD's own <code>app_update</code> reports whether anything changed, so checking and applying are the same action here. It stops the service, updates, then starts it back up.</div>
+        <div class="callout">
+          <svg class="i"><use href="#i-info"/></svg>
+          <div>The update asks Steam for the newest build first. If you already have it, nothing is stopped. Otherwise it stops the service, saves a backup of the data folder (and gives up if that backup is not readable), updates, and starts the server again, even if the update failed.</div>
         </div>
         <div class="grid-2">
           <div class="action-card warn">
             <div class="action-icon"><svg class="i"><use href="#i-download-cloud"/></svg></div>
             <div class="action-body">
               <h3>Check &amp; apply update</h3>
-              <p>Stops the server, re-validates against Steam, starts it back up. Check your Workshop mods after a major build update first.</p>
+              <p>Only touches the server when Steam has a newer build. Check your Workshop mods after a major build update first.</p>
             </div>
-            <button class="btn btn-warn" onclick="pzApplyUpdate()">Check &amp; apply</button>
+            <button class="btn btn-warn" id="pz-update-btn" onclick="pzApplyUpdate(false)">Check &amp; apply</button>
+          </div>
+          <div class="action-card">
+            <div class="action-icon"><svg class="i"><use href="#i-refresh"/></svg></div>
+            <div class="action-body">
+              <h3>Update anyway</h3>
+              <p>Skips the check and always stops, backs up and re-validates the files. Use it if the check cannot reach Steam but you know a build is out, or to repair broken files.</p>
+            </div>
+            <button class="btn btn-secondary" id="pz-update-force-btn" onclick="pzApplyUpdate(true)">Update anyway</button>
           </div>
         </div>
         <div class="card card-flush">
@@ -1298,6 +1306,12 @@
           </div>
         </div>
 
+        <div class="subtabs" role="tablist" aria-label="Mods sections">
+          <button class="pz-subtab active" role="tab" data-pzsub="configured">Configured</button>
+          <button class="pz-subtab" role="tab" data-pzsub="history">History</button>
+        </div>
+
+        <div class="pz-subpanel active" id="pz-sub-configured">
         <div class="card card-flush">
           <div class="card-head padded">
             <div>
@@ -1333,6 +1347,23 @@
           </div>
           <ul id="pz-mods-list" class="row-list"></ul>
           <div id="pz-mods-unmanaged" class="card-section hidden"></div>
+        </div>
+        </div>
+
+        <div class="pz-subpanel" id="pz-sub-history">
+          <div class="card card-flush">
+            <div class="card-head padded">
+              <div>
+                <h2 class="card-title">Mod history</h2>
+                <p class="card-sub">The Workshop list, Mods= list and Map= line are saved automatically before every add, remove or reorder. Restore puts them back (the rest of the ini is not touched). You see a plan first and can untick anything.</p>
+              </div>
+              <div class="btn-group">
+                <button class="btn btn-secondary btn-sm" onclick="pzLoadHistory()"><svg class="i"><use href="#i-refresh"/></svg>Refresh</button>
+                <button class="btn btn-primary btn-sm" onclick="pzSaveSnapshot()"><svg class="i"><use href="#i-archive"/></svg>Save snapshot now</button>
+              </div>
+            </div>
+            <ul id="pz-history-list" class="row-list"></ul>
+          </div>
         </div>
       </section>
 
