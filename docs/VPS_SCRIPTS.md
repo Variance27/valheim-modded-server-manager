@@ -24,7 +24,7 @@ The `vps-scripts/` folder holds scripts that run **on the VPS**. The GUI uploads
 
 ## Templates
 
-The scripts in this repo contain placeholders such as `__LGSM_USER__`, `__LGSM_HOME__`, `__SERVER_DIR__` and `__BACKUP_DIR__`. The GUI fills them in when it installs a script (`renderScriptTemplate` in `server.js`). **Do not copy the repo version straight to a server.** If you see `__LGSM_HOME__` in an error message, an unrendered template reached the VPS: run Setup step 7 again, which re-renders and installs the scripts.
+The scripts in this repo contain placeholders such as `__LGSM_USER__`, `__LGSM_HOME__`, `__SERVER_DIR__` and `__BACKUP_DIR__`. The GUI fills them in when it installs a script (`renderScriptTemplate` in `src/setup.js`). **Do not copy the repo version straight to a server.** If you see `__LGSM_HOME__` in an error message, an unrendered template reached the VPS: run Setup step 7 again, which re-renders and installs the scripts.
 
 Step 7 compares checksums. A script that already exists and differs is kept as `<name>.bak.<timestamp>` before being replaced, so you can delete those backups once the new scripts work.
 

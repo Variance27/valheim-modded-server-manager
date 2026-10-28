@@ -14,8 +14,20 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - **Migration to a new VPS (Migration page).** Export one or more worlds as a single bundle (saves, LinuxGSM settings, BepInEx plugins and configs, disabled mods, snapshots), download it, point the GUI at the new VPS, and import it there. The bundle is checksummed and verified before anything is unpacked, nothing on either VPS is deleted (replaced files go to `pre-migration-<time>`), and the GUI shows what is ready on the new VPS. See [docs/MIGRATION.md](docs/MIGRATION.md).
 
+### Changed
+
+- **The server code is split into one file per feature** under `src/`; `server.js` only loads them. Behaviour is unchanged: before and after were compared with the GUI booted against a fake VPS (same 127 routes and middleware, identical responses to 138 requests). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#overview).
+- **Project Zomboid updates** run as one script (`vps-scripts/update-zomboid.sh`), and the Zomboid tab gained mod history and rollback.
+- **The server update check** tries every SteamCMD that LinuxGSM installs before the distro's wrapper, and reports which ones it tried.
+- New checks: `npm run lint` (ESLint for undefined and unused names), `npm run check` now covers every JS, shell and Python file and rejects CRLF in shell scripts, and `.gitattributes` keeps files LF so scripts stay valid on Linux. New unit tests for the mod, rollback and migration helpers and a server boot test that also runs on Windows.
+
+### Removed
+
+- **Off-site backups with rclone** (`CLOUD_REMOTE` / `CLOUD_KEEP`). Backups stay on the VPS, with `LOCAL_KEEP` retention. Re-run Setup step 7 to install the updated backup script; a `CLOUD_REMOTE` line left in `valheim-notify.conf` is ignored.
+
 ### Fixed
 
+- Updated `express` (4.22.3, with `body-parser` 1.20.9 and `qs` 6.16.2) for two denial-of-service advisories in request parsing.
 - **Apply update no longer leaves the server down when the update step fails.** `update-valheim.sh` now checks that SteamCMD exists before stopping anything, and if LinuxGSM's own `update` fails (for example at "Checking remote build") it falls back to SteamCMD's `app_update` on the same server folder (after clearing SteamCMD's cached app info and refreshing it, because a stale cache makes SteamCMD report "already up to date" while a newer build exists). If both fail, it starts the server again on the build it already had and says so in the output and in Discord. The backup gate is unchanged. Re-run Setup step 7 to install the new script.
 - The Discord notifications, Health alerts and Discord bot cards in Settings have a cleaner layout: aligned panels and rows, consistent buttons, and no extra indentation. Password and number fields now use the same styling as other inputs instead of the browser's grey default.
 - The Backups lists (Valheim and Project Zomboid) no longer show `.txt` files such as the `-plugins.txt` mod-list records, which had a Restore button that could not work, and they no longer use up the 50 listed entries. Only real backups are listed and can be restored.

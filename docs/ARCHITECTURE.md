@@ -5,14 +5,15 @@ A short map for contributors.
 ## Overview
 
 ```
-Browser  ──HTTP──▶  server.js (Node + Express)  ──SSH or local shell──▶  VPS
- public/                │                                              LinuxGSM, BepInEx,
- (plain JS, no build)   ├─ auth.js        login, sessions, CSRF         ValheimEnforcer,
-                        ├─ config.json    connection + overrides        cron, helper scripts
+Browser  ──HTTP──▶  server.js + src/ (Node + Express)  ──SSH or local shell──▶  VPS
+ public/                │                                                    LinuxGSM, BepInEx,
+ (plain JS, no build)   ├─ auth.js        login, sessions, CSRF               ValheimEnforcer,
+                        ├─ config.json    connection + overrides              cron, helper scripts
                         └─ instances.json extra worlds
 ```
 
-- **No build step and no framework.** `public/` is plain HTML, CSS and JavaScript served as-is. `server.js` is a single Express file organized in commented sections (`// ---- Backups ----` and so on).
+- **No build step and no framework.** `public/` is plain HTML, CSS and JavaScript served as-is.
+- **One file per feature.** `server.js` only loads the files in `src/` and starts listening. Each file opens with a one-line summary. Four core files load first and never depend on a feature: `context.js` (config, worlds, `ROOT`), `notify.js` (webhook settings), `exec.js` (running commands on the VPS) and `app.js` (Express, login, world selection). Feature files import core helpers by name (`const { sshExec } = require('./exec')`). Features use each other circularly, so they import each other as a whole and call through it (`worldInfo.getWorldInfo()`), and never at load time. Each file exports with `Object.assign(module.exports, {...})`, never `module.exports = ...`. No two routes overlap, so the order files register their routes in does not matter; a middleware that must run before certain routes belongs in `app.js`.
 - **The GUI does not hold state about the game.** It runs commands on the VPS and reads files there. Scheduled backups and update checks are real cron jobs on the VPS, so the GUI can be closed.
 - **Dependencies:** `express`, `ssh2` and `js-yaml`. Nothing else is needed on the GUI machine.
 
@@ -45,7 +46,9 @@ Package lists from Thunderstore and Hexium are cached in memory in a slimmed for
 ## Checks
 
 ```bash
-npm run check          # syntax-checks server.js, auth.js, set-password.js and public/app.js
+npm run check          # syntax of every JS, shell and Python file; fails on CRLF in a .sh
+npm run lint           # ESLint: undefined and unused names (catches a missed import after moving code)
+npm test               # API, script and unit tests (see Testing)
 ```
 
-CI runs the same check plus `bash -n` on the shell scripts and a Python compile of the helpers. There is no automated end-to-end suite in the repository yet; contributions are welcome.
+CI runs all three, plus the Python tests. `.gitattributes` keeps every file LF: the scripts in `vps-scripts/` are uploaded to Linux byte for byte, and a CRLF shell script fails there.

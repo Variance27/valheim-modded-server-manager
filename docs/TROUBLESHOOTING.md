@@ -30,10 +30,6 @@ More generally, "Non-allowed mods" means the client has a mod that is not in the
 
 An unrendered script template reached the VPS (a repo copy was uploaded by hand). Run Setup step 7 again, or restore the original from the `.bak.<timestamp>` copy. To check: `grep -l "__LGSM_\|__SERVER_DIR__" /home/vhserver/scripts/*`.
 
-## Off-site backups do not run
-
-`CLOUD_REMOTE` must be set in `/home/vhserver/.config/valheim-notify.conf`, for example `CLOUD_REMOTE=MyRemote:Valheim-Backups`, and the rclone remote must exist for the game account. Without it, backups stay on the VPS by design.
-
 ## Start fails with "Ownership issues found"
 
 LinuxGSM refuses to start if files under its folders are owned by root. The GUI fixes the ownership and retries once on its own. By hand: `sudo chown -R vhserver:vhserver /home/vhserver`.
