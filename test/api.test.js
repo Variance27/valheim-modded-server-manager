@@ -284,6 +284,9 @@ test('migration: preview, export, download, upload, verify and import through th
   } finally {
     g.stop();
     delete process.env.VGUI_MIGRATION_DIR;
+    // The migration scripts run as root and chmod 700 their staging folder, so a non-root test
+    // user can only remove it the same way.
+    if (process.getuid && process.getuid() !== 0) spawnSync('sudo', ['-n', 'rm', '-rf', path.join(root, 'stage')]);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
