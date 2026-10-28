@@ -669,7 +669,7 @@ function showPage(page, { focus = false } = {}) {
     if (page === 'configs') loadConfigList();
     if (page === 'migration') loadMigration();
     if (page === 'pz-backups') pzListBackups();
-    if (page === 'pz-mods') pzLoadMods();
+    if (page === 'pz-mods') { pzLoadMods(); if (typeof pzShowModsTab === 'function') pzShowModsTab('configured'); }
   }
   if (page === 'worlds') loadWorlds();
   if (page === 'dashboard') renderUsageChart();
@@ -4030,9 +4030,7 @@ async function runHealth() {
 
 /* ---- Discord /codes bot (API: /api/bot) ---- */
 
-let botSt = null;
 function renderBot(st) {
-  botSt = st;
   const badge = $('bot-badge');
   const managed = st.unit === 'managed';
   const running = st.active === 'active';
@@ -4459,7 +4457,6 @@ $('logs-output').addEventListener('scroll', (e) => {
    ========================================================================== */
 let worldsCache = null; // [{ id, label, main, state, port, ... }]
 let currentWorldId = 'main';
-let worldsTimer = null;
 
 const worldTitle = (w) => (w.main ? (w.worldReady ? w.world : w.label) : w.label);
 const worldQ = (id) => `?instance=${encodeURIComponent(id)}`;
@@ -5575,20 +5572,37 @@ async function pzRestoreBackup(file) {
   setTimeout(pzRefreshStatus, 1500);
 }
 
-/* ---- Updates (API: SSE /api/pz/update/apply) ---- */
-async function pzApplyUpdate() {
+/* ---- Updates (API: SSE /api/pz/update/apply[?force=1]) ---- */
+// The script's last line is "RESULT: <outcome> ...", which decides the message shown.
+function pzUpdateOutcome(text) {
+  const lines = String(text || '').split('\n').filter((l) => l.startsWith('RESULT: '));
+  if (!lines.length) return null;
+  const [kind, from, to] = lines[lines.length - 1].slice(8).trim().split(/\s+/);
+  return { kind, from, to };
+}
+
+async function pzApplyUpdate(force) {
   const ok = await confirmDialog({
-    title: 'Check & apply the Zomboid update now?',
+    title: force ? 'Update Zomboid anyway?' : 'Check & apply the Zomboid update now?',
     tone: 'warn',
-    html: '<p>Stops the server, re-validates via SteamCMD, starts it back up. Check your Workshop mods\' pages after a major build update.</p>',
-    confirmLabel: 'Check & apply',
+    html: force
+      ? '<p>Skips the check: stops the server, saves a backup, re-validates the files via SteamCMD and starts the server again.</p>'
+      : '<p>Asks Steam for the newest build. If there is one, the server is stopped, backed up, updated and started again. If not, nothing is touched.</p>',
+    confirmLabel: force ? 'Update anyway' : 'Check & apply',
   });
   if (!ok) return;
-  const btn = qs('#tab-pz-updates .action-card .btn');
-  setBtnLoading(btn, true);
-  const code = await streamToConsole('/api/pz/update/apply', $('pz-update-output'));
-  setBtnLoading(btn, false);
-  if (code === '0') toast('success', 'Update applied');
+  const btns = [$('pz-update-btn'), $('pz-update-force-btn')];
+  btns.forEach((b) => setBtnLoading(b, true));
+  const out = $('pz-update-output');
+  const code = await streamToConsole(`/api/pz/update/apply${force ? '?force=1' : ''}`, out);
+  btns.forEach((b) => setBtnLoading(b, false));
+  const r = pzUpdateOutcome(out.textContent);
+  if (r && r.kind === 'uptodate') toast('success', 'Already up to date', `Build ${r.from} is the newest. The server was not stopped.`);
+  else if (r && r.kind === 'updated') toast('success', 'Update applied', `Build ${r.from} to ${r.to}. The server was started again.`);
+  else if (r && r.kind === 'aborted') toast('warn', 'Nothing was changed', 'See the output for why.');
+  else if (r && r.kind === 'failed-restarted') toast('error', 'Update failed', 'The server was started again on its old build.');
+  else if (r && (r.kind === 'failed-down' || r.kind === 'updated-not-started')) toast('error', 'The server is not running', 'See the output, then check the Dashboard.');
+  else if (code === '0') toast('success', 'Update applied');
   else toast('error', 'Update failed', code ? `Exit code ${code}` : 'Stream closed early');
 }
 
@@ -5745,6 +5759,117 @@ async function pzLoadMods() {
     }
   } catch (e) {
     list.innerHTML = `<li class="empty-li">${emptyState({ title: 'Could not load mods', text: e.message, error: true, action: '<button class="btn btn-secondary btn-sm" onclick="pzLoadMods()">Try again</button>' })}</li>`;
+  }
+}
+
+// ---- Zomboid mod history (API: /api/pz/mods/history, /snapshot, /restore-plan, /restore) ----
+let pzModsTab = 'configured';
+function pzShowModsTab(tab) {
+  pzModsTab = tab;
+  qsa('.pz-subtab').forEach((b) => {
+    const on = b.dataset.pzsub === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on);
+  });
+  qsa('.pz-subpanel').forEach((p) => p.classList.toggle('active', p.id === 'pz-sub-' + tab));
+  if (tab === 'history') pzLoadHistory();
+}
+qsa('.pz-subtab').forEach((b) => (b.onclick = () => pzShowModsTab(b.dataset.pzsub)));
+
+async function pzLoadHistory() {
+  const list = $('pz-history-list');
+  list.innerHTML = `<li class="empty-li">${emptyState({ iconName: 'clock', title: 'Loading…', small: true })}</li>`;
+  let items = [];
+  try {
+    items = (await api('/api/pz/mods/history')).items || [];
+  } catch (e) {
+    list.innerHTML = `<li class="empty-li">${emptyState({ iconName: 'alert', title: 'Could not load the history', text: esc(e.message), small: true })}</li>`;
+    return;
+  }
+  if (!items.length) {
+    list.innerHTML = `<li class="empty-li">${emptyState({
+      iconName: 'clock',
+      title: 'No snapshots yet',
+      text: 'One is saved automatically the next time you add, remove or reorder a mod.',
+      action: `<button class="btn btn-primary btn-sm" onclick="pzSaveSnapshot()">${icon('archive')}Save snapshot now</button>`,
+    })}</li>`;
+    return;
+  }
+  list.innerHTML = '';
+  items.forEach((it) => {
+    const li = document.createElement('li');
+    const when = it.ts ? `${new Date(it.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${timeAgo(it.ts)}` : 'Date unknown';
+    li.innerHTML = `<span class="row-icon">${icon('clock')}</span>
+      <div class="row-main"><div class="row-title"><span class="mod-name" style="font-size:13px">${esc(it.reason)}</span><span class="badge">Snapshot</span></div>
+      <div class="row-desc">${esc(when)} · ${pluralize(it.count, 'Workshop item')}</div></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-warn btn-sm';
+    btn.innerHTML = `${icon('rotate')}Restore`;
+    btn.onclick = () => pzOpenRestore(it);
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+}
+
+async function pzSaveSnapshot() {
+  try {
+    const r = await api('/api/pz/mods/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Saved manually' }) });
+    toast('success', 'Snapshot saved', pluralize(r.count, 'Workshop item'));
+    if (pzModsTab === 'history') pzLoadHistory();
+  } catch (e) {
+    toast('error', 'Could not save the snapshot', e.message);
+  }
+}
+
+function pzRestoreLineText(l) {
+  const ids = (l.modIds || []).length ? ` <span class="mono muted">${esc(l.modIds.join(', '))}</span>` : '';
+  if (l.action === 'add') return `<span class="badge info">Add</span> <span class="mono">${esc(l.name)}</span> <span class="mono muted">${esc(l.workshopId)}</span>${ids}${l.modIdsKnown ? '' : ' <span class="muted">(Mod IDs unknown: the server will not load it until they are set)</span>'}`;
+  if (l.action === 'remove') return `<span class="badge bad">Remove</span> <span class="mono">${esc(l.name)}</span> <span class="mono muted">${esc(l.workshopId)}</span>${ids}`;
+  if (l.action === 'order') return '<span class="badge info">Load order</span> Put the Workshop items back in the saved order';
+  if (l.action === 'modid-add') return `<span class="badge info">Add Mod ID</span> <span class="mono">${esc(l.modId)}</span> <span class="muted">(added by hand)</span>`;
+  if (l.action === 'modid-remove') return `<span class="badge bad">Remove Mod ID</span> <span class="mono">${esc(l.modId)}</span> <span class="muted">(added by hand)</span>`;
+  return `<span class="badge info">Map</span> <span class="mono">${esc(l.from || 'none')}</span> to <span class="mono">${esc(l.to)}</span>`;
+}
+
+async function pzOpenRestore(item) {
+  let plan;
+  try {
+    plan = await api(`/api/pz/mods/restore-plan?id=${encodeURIComponent(item.id)}`);
+  } catch (e) {
+    toast('error', 'Could not build the restore plan', e.message);
+    return;
+  }
+  if (!plan.lines.length) {
+    await dialog({
+      title: 'Nothing to restore',
+      tone: 'info',
+      html: `<p>The mods already match this snapshot${plan.unchanged ? ` (${pluralize(plan.unchanged, 'Workshop item')} unchanged)` : ''}.</p>`,
+      actions: [],
+      cancelLabel: 'Close',
+    });
+    return;
+  }
+  const res = await dialog({
+    title: 'Restore mods to this snapshot?',
+    tone: 'warn',
+    html: `<p><strong>${esc(plan.label)}</strong>${plan.ts ? ` <span class="muted">· ${esc(new Date(plan.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</span>` : ''}. Untick anything you want to leave alone.</p>
+      <ul class="dialog-list dep-list">${plan.lines.map((l, i) => `<li><label class="dep-check"><input type="checkbox" value="${i}" checked> ${pzRestoreLineText(l)}</label></li>`).join('')}</ul>
+      ${plan.unchanged ? `<p class="muted">${pluralize(plan.unchanged, 'Workshop item')} already match.</p>` : ''}
+      <p class="muted">Only the ticked ini lines are changed, the server is not restarted, and a snapshot of the current state is saved first so this can be undone. Use Restart on the Dashboard to load the result.</p>`,
+    actions: [{ key: 'go', label: 'Restore ticked', variant: 'btn-warn' }],
+    collect: (body) => {
+      const v = [...body.querySelectorAll('input[type=checkbox]:checked')].map((x) => plan.lines[parseInt(x.value, 10)].key);
+      return v.length ? v : { error: 'Tick at least one change.' };
+    },
+  });
+  if (!res || res.key !== 'go') return;
+  try {
+    const r = await api('/api/pz/mods/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id, keys: res.value }) });
+    toast('success', 'Mods restored', `${pluralize(r.applied, 'change')} applied. Restart the server to load them.`);
+    pzLoadHistory();
+    pzLoadMods();
+  } catch (e) {
+    toast('error', 'Restore failed', e.message);
   }
 }
 
