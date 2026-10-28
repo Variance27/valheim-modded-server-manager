@@ -119,3 +119,12 @@ Add an entry whenever a bug or mistake is found: what happened, why, and the rul
   so the non-root test user got `EACCES` deleting it.
 - **Rule:** when a test makes something run as root, remove its output with `sudo -n rm -rf`. When
   CI fails, check whether `main` fails the same way before assuming the new change caused it.
+
+## Check the commit email before committing to a public repo
+
+- **What:** a fresh clone was set up with the user's personal email, and 6 commits went to the
+  public repo with it, while every earlier commit used GitHub's private noreply address. Undoing
+  it meant rewriting history and force-pushing `main`.
+- **Rule:** in any new clone, set `user.email` to the address the repo's history already uses
+  (`git log --format='%ae' | sort -u`) before the first commit. Here that's
+  `93426754+Variance27@users.noreply.github.com`.
